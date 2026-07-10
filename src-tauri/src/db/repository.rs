@@ -1,7 +1,7 @@
 //! CRUD over a keyed SQLCipher connection. All SQL lives here; the frontend
 //! only ever sees the DTOs in `super::models`, never table names.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
 use super::connection::DbError;
@@ -9,6 +9,22 @@ use super::models::*;
 
 fn json_from_text(s: Option<String>) -> Option<Value> {
     s.and_then(|t| serde_json::from_str(&t).ok())
+}
+
+// ── app_metadata ───────────────────────────────────────────────────────────
+
+pub fn get_metadata(conn: &Connection, key: &str) -> Result<Option<String>, DbError> {
+    conn.query_row("SELECT value FROM app_metadata WHERE key = ?1", [key], |r| r.get(0))
+        .optional()
+        .map_err(Into::into)
+}
+
+pub fn set_metadata(conn: &Connection, key: &str, value: &str) -> Result<(), DbError> {
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES (?1, ?2)",
+        params![key, value],
+    )?;
+    Ok(())
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────

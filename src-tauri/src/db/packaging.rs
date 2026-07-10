@@ -1,6 +1,9 @@
 //! Build a reviewer-specific `.atb` assignment package from a coordinator
 //! workspace: validate, copy only the selected reviewer's assigned patients
 //! into a fresh encrypted database, and return an integrity receipt.
+//!
+//! Command-wired with coordinator mode; exercised now by unit tests.
+#![allow(dead_code)]
 
 use std::path::Path;
 

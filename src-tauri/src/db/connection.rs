@@ -119,6 +119,7 @@ pub fn verify_integrity(conn: &Connection) -> Result<(), DbError> {
 }
 
 /// Return the SQLCipher version string (e.g. "4.6.1 community").
+#[allow(dead_code)]
 pub fn cipher_version(conn: &Connection) -> Option<String> {
     conn.query_row("PRAGMA cipher_version", [], |r| r.get(0))
         .ok()

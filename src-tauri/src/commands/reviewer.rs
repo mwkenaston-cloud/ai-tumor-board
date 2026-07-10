@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager, State};
 use super::{Session, SessionState};
 use crate::crypto::container::{self, ContainerRole};
 use crate::db::models::{Assignment, AuditEvent, NoteBlock, Patient, RecommendationDecision};
+use crate::db::response::{self, ResponseReceipt};
 use crate::db::{repository as repo, seed};
 
 /// DEV convenience password. The real reviewer flow (Phase 3) derives the key
@@ -199,6 +200,43 @@ pub fn submit_assignment(
     })?;
     write_recovery_copy(&app, &state);
     Ok(())
+}
+
+/// Build and seal a `.atbr` response file at `destination`, using the
+/// assignment id and coordinator public key embedded in the assignment package.
+#[tauri::command]
+pub fn export_response(
+    state: State<SessionState>,
+    destination: String,
+) -> Result<ResponseReceipt, String> {
+    with_session(&state, |s| {
+        let assignment_id = repo::get_metadata(&s.conn, "assignment_id")
+            .map_err(map_err)?
+            .ok_or("assignment is missing an assignment id")?;
+        let pub_hex = repo::get_metadata(&s.conn, "coordinator_public_hex")
+            .map_err(map_err)?
+            .ok_or("assignment has no coordinator key; rebuild the package")?;
+        let pubkey = hex32(&pub_hex).ok_or("coordinator key is malformed")?;
+        response::build_response(
+            &s.conn,
+            &s.path,
+            std::path::Path::new(&destination),
+            &assignment_id,
+            &pubkey,
+        )
+        .map_err(map_err)
+    })
+}
+
+fn hex32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = (0..64)
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect();
+    bytes?.try_into().ok()
 }
 
 /// Copy the current assignment file into a rotating recovery slot in app-data.

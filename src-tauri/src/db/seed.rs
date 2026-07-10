@@ -6,7 +6,22 @@
 use rusqlite::{params, Connection};
 
 use super::connection::DbError;
-use super::repository::now_iso;
+use super::repository::{self as repo, now_iso};
+use crate::crypto::response_seal;
+
+/// DEV-ONLY coordinator X25519 secret. Its public key is embedded in the seeded
+/// assignment so the reviewer export flow can seal a response, and a dev import
+/// tool can open it with the same secret. Never used by the shipped coordinator.
+pub const DEV_COORDINATOR_SECRET: [u8; 32] = [7u8; 32];
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
 
 pub fn seed_demo(conn: &Connection, reviewer_id: &str) -> Result<(), DbError> {
     let now = now_iso();
@@ -37,6 +52,12 @@ pub fn seed_demo(conn: &Connection, reviewer_id: &str) -> Result<(), DbError> {
          VALUES (?1, 'Reviewer 04', 'reviewer', 'ready')",
         params![reviewer_id],
     )?;
+
+    // Response-package metadata: a stable assignment id and the coordinator's
+    // public key that reviewer responses are sealed to.
+    repo::set_metadata(conn, "assignment_id", "ASG-DEV-1")?;
+    let dev_pub = response_seal::public_from_secret(&DEV_COORDINATOR_SECRET);
+    repo::set_metadata(conn, "coordinator_public_hex", &hex_encode(&dev_pub))?;
 
     seed_patient(
         conn, reviewer_id, 0, "PT-1", "TUM-0042",

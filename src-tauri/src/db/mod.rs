@@ -6,9 +6,11 @@
 //! (see `crate::crypto`) and handed to SQLCipher in raw-key mode.
 
 pub mod connection;
+pub mod metrics;
 pub mod models;
 pub mod packaging;
 pub mod repository;
+pub mod response;
 pub mod seed;
 
 pub const SCHEMA_VERSION: i64 = 1;

@@ -32,5 +32,13 @@ export const ipc = {
     invoke<void>("save_survey", { patientId, answers }),
   submitAssignment: (generalAnswers: Record<string, string>) =>
     invoke<void>("submit_assignment", { generalAnswers }),
+  exportResponse: (destination: string) =>
+    invoke<ResponseReceipt>("export_response", { destination }),
   cipherVersion: () => invoke<string | null>("cipher_version"),
 };
+
+export interface ResponseReceipt {
+  sha256: string;
+  reviewerId: string;
+  patientCount: number;
+}

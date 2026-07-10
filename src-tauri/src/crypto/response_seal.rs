@@ -34,6 +34,12 @@ pub fn generate_keypair() -> ([u8; 32], [u8; 32]) {
     (secret.to_bytes(), public.to_bytes())
 }
 
+/// Derive the X25519 public key for a given secret (used to publish a
+/// coordinator's public key from their stored secret).
+pub fn public_from_secret(secret: &[u8; 32]) -> [u8; 32] {
+    SecretKey::from(*secret).public_key().to_bytes()
+}
+
 /// Seal `plaintext` to `recipient_public`. Output = ephemeral_pk(32) ||
 /// nonce(24) || ciphertext(+16 tag).
 pub fn seal_to(recipient_public: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, SealError> {

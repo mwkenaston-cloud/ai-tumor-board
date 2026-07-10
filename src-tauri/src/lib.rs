@@ -35,6 +35,7 @@ pub fn run() {
             reviewer::complete_patient,
             reviewer::save_survey,
             reviewer::submit_assignment,
+            reviewer::export_response,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
