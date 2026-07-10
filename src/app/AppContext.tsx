@@ -6,6 +6,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +26,7 @@ import {
   similarityPercent,
   userBlock,
 } from "../services/noteBlocks";
+import { ipc, isTauri } from "../services/ipc";
 
 export type Screen =
   | "home"
@@ -91,13 +93,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const saveTimer = useRef<number | null>(null);
 
-  // Simulated debounced "save" for the Phase 1 UI; replaced by real autosave
-  // against the repository in Phase 2.
+  // Always-current view of patients for use inside stable callbacks/persistence
+  // (which would otherwise close over a stale snapshot).
+  const patientsRef = useRef(patients);
+  useEffect(() => {
+    patientsRef.current = patients;
+  }, [patients]);
+
+  const persistDecision = useCallback(
+    (
+      patientId: string,
+      recommendationId: string,
+      patch: Partial<Patient["decisions"][number]>
+    ) => {
+      if (!isTauri()) return;
+      const p = patientsRef.current[patientId];
+      const existing = p?.decisions.find((d) => d.recommendationId === recommendationId);
+      const decision = {
+        recommendationId,
+        status: "pending" as const,
+        originalText: null,
+        finalText: null,
+        editDistance: null,
+        similarityPercent: null,
+        decisionElapsedSeconds: null,
+        dismissalReason: null,
+        decidedAt: null,
+        ...existing,
+        ...patch,
+      };
+      ipc.saveDecision(decision).catch((e) => console.error("save_decision failed", e));
+    },
+    []
+  );
+
+  // In non-Tauri (browser preview) mode there is no backend, so simulate a
+  // save. Under Tauri, the autosave effect below drives the indicator instead.
   const flagSaved = useCallback(() => {
+    if (isTauri()) return;
     setSaveState("saving");
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => setSaveState("saved"), 400);
   }, []);
+
+  // Autosave the current patient's note blocks to the encrypted DB, debounced.
+  // Fires on any change to the current patient (blocks, decisions), which is a
+  // harmless re-save of the authoritative block array.
+  useEffect(() => {
+    if (!isTauri() || !currentPatientId) return;
+    const p = patients[currentPatientId];
+    if (!p) return;
+    setSaveState("saving");
+    const t = window.setTimeout(() => {
+      ipc
+        .saveNoteBlocks(p.id, p.noteBlocks)
+        .then(() => setSaveState("saved"))
+        .catch((e) => {
+          console.error("autosave failed", e);
+          setSaveState("idle");
+        });
+    }, 500);
+    return () => window.clearTimeout(t);
+  }, [patients, currentPatientId]);
 
   const updatePatient = useCallback(
     (patientId: string, fn: (p: Patient) => Patient) => {
@@ -129,13 +186,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const enterReviewer = useCallback(() => {
     setRole("reviewer");
-    setAssignment(seedAssignment());
-    setPatients(seedPatients());
-    setScreen("lobby");
+    if (isTauri()) {
+      ipc
+        .openDevAssignment()
+        .then((a) => {
+          setAssignment(a);
+          setPatients({});
+          setScreen("lobby");
+        })
+        .catch((e) => {
+          console.error("open_dev_assignment failed; falling back to seed", e);
+          setAssignment(seedAssignment());
+          setPatients(seedPatients());
+          setScreen("lobby");
+        });
+    } else {
+      setAssignment(seedAssignment());
+      setPatients(seedPatients());
+      setScreen("lobby");
+    }
   }, []);
 
   const openPatient = useCallback(
     (patientId: string) => {
+      if (isTauri()) {
+        ipc
+          .openPatient(patientId)
+          .then((p) => {
+            const patient =
+              p.noteBlocks.length > 0 ? p : { ...p, noteBlocks: reindex([userBlock("")]) };
+            setPatients((prev) => ({ ...prev, [patientId]: patient }));
+            setCurrentPatientId(patientId);
+            setScreen("review");
+            setPatientStatus(patientId, patient.status as PatientState);
+          })
+          .catch((e) => console.error("open_patient failed", e));
+        return;
+      }
       setCurrentPatientId(patientId);
       setScreen("review");
       updatePatient(patientId, (p) => {
@@ -196,8 +283,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         return { ...p, noteBlocks: reindex(blocks), decisions };
       });
+      const rec = patientsRef.current[patientId]?.recommendations.find(
+        (r) => r.id === recommendationId
+      );
+      if (rec) {
+        persistDecision(patientId, recommendationId, {
+          status: "used",
+          originalText: rec.text,
+          finalText: rec.text,
+          editDistance: 0,
+          similarityPercent: 100,
+          decidedAt: new Date().toISOString(),
+        });
+      }
     },
-    [updatePatient]
+    [updatePatient, persistDecision]
   );
 
   const dismissRecommendation = useCallback(
@@ -210,14 +310,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         return { ...p, decisions };
       });
+      persistDecision(patientId, recommendationId, {
+        status: "dismissed",
+        dismissalReason: reason ?? null,
+        decidedAt: new Date().toISOString(),
+      });
     },
-    [updatePatient]
+    [updatePatient, persistDecision]
   );
 
   const removeBlock = useCallback(
     (patientId: string, blockId: string) => {
+      const removed = patientsRef.current[patientId]?.noteBlocks.find((b) => b.id === blockId);
       updatePatient(patientId, (p) => {
-        const removed = p.noteBlocks.find((b) => b.id === blockId);
         let decisions = p.decisions;
         if (removed && removed.type === "ai") {
           decisions = p.decisions.filter(
@@ -230,8 +335,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           decisions,
         };
       });
+      // Reset the decision to pending in the DB so the rec is no longer "used".
+      if (removed && removed.type === "ai") {
+        persistDecision(patientId, removed.recommendationId, {
+          status: "pending",
+          finalText: null,
+          decidedAt: null,
+        });
+      }
     },
-    [updatePatient]
+    [updatePatient, persistDecision]
   );
 
   const completePatient = useCallback(
@@ -242,6 +355,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         completedAt: new Date().toISOString(),
       }));
       setPatientStatus(patientId, "complete");
+      if (isTauri()) {
+        const elapsed = patientsRef.current[patientId]?.elapsedSeconds ?? 0;
+        ipc
+          .completePatient(patientId, elapsed)
+          .then(() => ipc.loadAssignment())
+          .then((a) => setAssignment(a))
+          .catch((e) => console.error("complete_patient failed", e));
+      }
       // Route to the per-patient survey when enabled, else straight to the queue.
       if (assignment?.settings.perPatientSurvey) {
         setScreen("patientSurvey");
@@ -258,6 +379,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...prev,
         perPatient: { ...prev.perPatient, [patientId]: answers },
       }));
+      if (isTauri()) {
+        ipc.saveSurvey(patientId, answers).catch((e) => console.error("save_survey failed", e));
+      }
       flagSaved();
       backToLobby();
     },
@@ -276,6 +400,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (generalAnswers: Record<string, string>) => {
       setSurveyData((prev) => ({ ...prev, general: generalAnswers }));
       setAssignment((prev) => (prev ? { ...prev, state: "submitted" } : prev));
+      if (isTauri()) {
+        ipc
+          .submitAssignment(generalAnswers)
+          .catch((e) => console.error("submit_assignment failed", e));
+      }
       flagSaved();
       setScreen("submitted");
     },
