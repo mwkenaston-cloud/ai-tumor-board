@@ -78,8 +78,13 @@ pub fn verify_credential(
 pub const AUTHORITY_PUBLIC_KEY_HEX: &str =
     "0000000000000000000000000000000000000000000000000000000000000000";
 
-// Wired into the coordinator role-gate command when coordinator mode lands.
-#[allow(dead_code)]
+/// True once a real study-authority key has been compiled in. When false the
+/// build is unprovisioned (development): coordinator mode is available but must
+/// be clearly flagged, and no credential can verify.
+pub fn is_provisioned() -> bool {
+    AUTHORITY_PUBLIC_KEY_HEX != "0000000000000000000000000000000000000000000000000000000000000000"
+}
+
 pub fn authority_public_key() -> Option<VerifyingKey> {
     let bytes = hex_decode(AUTHORITY_PUBLIC_KEY_HEX)?;
     let arr: [u8; 32] = bytes.try_into().ok()?;

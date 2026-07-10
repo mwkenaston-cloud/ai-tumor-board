@@ -3,6 +3,7 @@ mod commands;
 mod crypto;
 mod db;
 
+use commands::coordinator::{self, CoordinatorState};
 use commands::reviewer;
 use commands::SessionState;
 
@@ -23,6 +24,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(SessionState::default())
+        .manage(CoordinatorState::default())
         .invoke_handler(tauri::generate_handler![
             cipher_version,
             reviewer::open_dev_assignment,
@@ -36,6 +38,14 @@ pub fn run() {
             reviewer::save_survey,
             reviewer::submit_assignment,
             reviewer::export_response,
+            coordinator::coordinator_open_workspace,
+            coordinator::coordinator_summary,
+            coordinator::coordinator_add_patient,
+            coordinator::coordinator_add_document,
+            coordinator::coordinator_import_llm,
+            coordinator::coordinator_build_package,
+            coordinator::coordinator_import_response,
+            coordinator::coordinator_list_results,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

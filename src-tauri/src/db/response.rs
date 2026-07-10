@@ -359,10 +359,13 @@ fn copy_recommendations(src: &Connection, dst: &Connection, patient_id: &str) ->
     }).map_err(DbError::from)?;
     for row in rows {
         let d = row.map_err(DbError::from)?;
+        // llm_run_id is nulled: the response deliberately omits the raw LLM runs
+        // (source material), so keep no dangling FK to a run that isn't copied.
+        let _ = &d.1;
         dst.execute(
             "INSERT OR REPLACE INTO recommendations(recommendation_id,patient_id,llm_run_id,position,priority_rank,temperature_level,temperature_label,evidence_tier,risk_score,safety_score,title,recommendation_text,full_text,rationale,metadata_json,is_custom)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
-            params![d.0, patient_id, d.1, d.2, d.3, d.4, d.5, d.6, d.7, d.8, d.9, d.10, d.11, d.12, d.13, d.14],
+             VALUES (?1,?2,NULL,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+            params![d.0, patient_id, d.2, d.3, d.4, d.5, d.6, d.7, d.8, d.9, d.10, d.11, d.12, d.13, d.14],
         ).map_err(DbError::from)?;
     }
     Ok(())

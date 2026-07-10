@@ -2,6 +2,7 @@
 //! happens here in Rust; the React frontend only invokes these typed commands
 //! and never touches the filesystem or database directly.
 
+pub mod coordinator;
 pub mod reviewer;
 
 use std::path::PathBuf;

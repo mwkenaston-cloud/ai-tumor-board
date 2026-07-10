@@ -38,6 +38,16 @@ pub struct PackageReceipt {
     pub sha256: String,
     pub patient_count: usize,
     pub reviewer_id: String,
+    pub assignment_id: String,
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
 }
 
 /// Validate a patient is complete enough to ship: research id, clinical
@@ -82,6 +92,7 @@ pub fn build_package(
     dest_password: &str,
     reviewer_id: &str,
     patient_ids: &[String],
+    coordinator_public: &[u8; 32],
 ) -> Result<PackageReceipt, PackageError> {
     if patient_ids.is_empty() {
         return Err(PackageError::Validation("<none>".into(), "no patients selected".into()));
@@ -89,6 +100,8 @@ pub fn build_package(
     for pid in patient_ids {
         validate_patient(source, pid)?;
     }
+
+    let assignment_id = format!("ASG-{}", uuid::Uuid::new_v4());
 
     // Fresh encrypted destination, then copy the frozen slice into it.
     {
@@ -98,6 +111,9 @@ pub fn build_package(
         for (pos, pid) in patient_ids.iter().enumerate() {
             copy_patient(source, &dest, reviewer_id, pid, pos as i64)?;
         }
+        // Embed response-routing metadata: assignment id + coordinator key.
+        crate::db::repository::set_metadata(&dest, "assignment_id", &assignment_id)?;
+        crate::db::repository::set_metadata(&dest, "coordinator_public_hex", &hex_encode(coordinator_public))?;
         // Reopen-and-validate happens below on a clean handle.
     }
 
@@ -113,6 +129,7 @@ pub fn build_package(
         sha256,
         patient_count: count as usize,
         reviewer_id: reviewer_id.to_string(),
+        assignment_id,
     })
 }
 
@@ -270,10 +287,12 @@ mod tests {
         seed::seed_demo(&source, "REV-A").unwrap();
 
         // Package only PT-1 for the reviewer, with a distinct reviewer password.
+        let (_sec, pubkey) = crate::crypto::response_seal::generate_keypair();
         let dest_path = tempfile("reviewer.atb");
-        let receipt = build_package(&source, &dest_path, "reviewer-pw", "REV-A", &["PT-1".to_string()]).unwrap();
+        let receipt = build_package(&source, &dest_path, "reviewer-pw", "REV-A", &["PT-1".to_string()], &pubkey).unwrap();
         assert_eq!(receipt.patient_count, 1);
         assert_eq!(receipt.sha256.len(), 64);
+        assert!(receipt.assignment_id.starts_with("ASG-"));
 
         // The package opens with the reviewer password and contains only PT-1.
         let dest = container::open(&dest_path, "reviewer-pw").unwrap();
@@ -293,8 +312,9 @@ mod tests {
         // Blank out PT-1's clinical question to trip validation.
         source.execute("UPDATE patients SET clinical_question='' WHERE patient_id='PT-1'", []).unwrap();
 
+        let (_sec, pubkey) = crate::crypto::response_seal::generate_keypair();
         let dest_path = tempfile("reviewer2.atb");
-        let err = build_package(&source, &dest_path, "pw2", "REV-A", &["PT-1".to_string()]).unwrap_err();
+        let err = build_package(&source, &dest_path, "pw2", "REV-A", &["PT-1".to_string()], &pubkey).unwrap_err();
         assert!(matches!(err, PackageError::Validation(_, _)), "got {err:?}");
     }
 }
