@@ -26,8 +26,20 @@ import {
   userBlock,
 } from "../services/noteBlocks";
 
-export type Screen = "home" | "lobby" | "review";
+export type Screen =
+  | "home"
+  | "lobby"
+  | "review"
+  | "patientSurvey"
+  | "completion"
+  | "submitted";
 export type SaveState = "idle" | "saving" | "saved";
+
+/** Per-patient survey responses keyed by patientId, plus the final general survey. */
+export interface SurveyData {
+  perPatient: Record<string, Record<string, string>>;
+  general: Record<string, string>;
+}
 
 interface AppState {
   role: "coordinator" | "reviewer" | null;
@@ -36,6 +48,7 @@ interface AppState {
   patients: Record<string, Patient>;
   currentPatientId: string | null;
   saveState: SaveState;
+  surveyData: SurveyData;
 }
 
 interface AppActions {
@@ -52,6 +65,9 @@ interface AppActions {
   ) => void;
   removeBlock: (patientId: string, blockId: string) => void;
   completePatient: (patientId: string) => void;
+  submitPatientSurvey: (patientId: string, answers: Record<string, string>) => void;
+  startCompletion: () => void;
+  submitAssignment: (generalAnswers: Record<string, string>) => void;
 }
 
 type AppContextValue = AppState & {
@@ -68,6 +84,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [patients, setPatients] = useState<Record<string, Patient>>({});
   const [currentPatientId, setCurrentPatientId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [surveyData, setSurveyData] = useState<SurveyData>({
+    perPatient: {},
+    general: {},
+  });
 
   const saveTimer = useRef<number | null>(null);
 
@@ -222,9 +242,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
         completedAt: new Date().toISOString(),
       }));
       setPatientStatus(patientId, "complete");
+      // Route to the per-patient survey when enabled, else straight to the queue.
+      if (assignment?.settings.perPatientSurvey) {
+        setScreen("patientSurvey");
+      } else {
+        backToLobby();
+      }
+    },
+    [updatePatient, setPatientStatus, backToLobby, assignment]
+  );
+
+  const submitPatientSurvey = useCallback(
+    (patientId: string, answers: Record<string, string>) => {
+      setSurveyData((prev) => ({
+        ...prev,
+        perPatient: { ...prev.perPatient, [patientId]: answers },
+      }));
+      flagSaved();
       backToLobby();
     },
-    [updatePatient, setPatientStatus, backToLobby]
+    [flagSaved, backToLobby]
+  );
+
+  const startCompletion = useCallback(() => {
+    if (assignment?.settings.generalSurvey) {
+      setScreen("completion");
+    } else {
+      setScreen("submitted");
+    }
+  }, [assignment]);
+
+  const submitAssignment = useCallback(
+    (generalAnswers: Record<string, string>) => {
+      setSurveyData((prev) => ({ ...prev, general: generalAnswers }));
+      setAssignment((prev) => (prev ? { ...prev, state: "submitted" } : prev));
+      flagSaved();
+      setScreen("submitted");
+    },
+    [flagSaved]
   );
 
   const actions: AppActions = useMemo(
@@ -238,6 +293,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissRecommendation,
       removeBlock,
       completePatient,
+      submitPatientSurvey,
+      startCompletion,
+      submitAssignment,
     }),
     [
       enterReviewer,
@@ -249,6 +307,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dismissRecommendation,
       removeBlock,
       completePatient,
+      submitPatientSurvey,
+      startCompletion,
+      submitAssignment,
     ]
   );
 
@@ -261,6 +322,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     patients,
     currentPatientId,
     saveState,
+    surveyData,
     actions,
     currentPatient,
   };

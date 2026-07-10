@@ -3,6 +3,9 @@ import { AppProvider, useApp } from "./app/AppContext";
 import HomeScreen from "./screens/HomeScreen";
 import PhysicianLobby from "./screens/PhysicianLobby";
 import PatientReview from "./screens/PatientReview";
+import PatientSurvey from "./screens/PatientSurvey";
+import CompletionSurvey from "./screens/CompletionSurvey";
+import SubmissionScreen from "./screens/SubmissionScreen";
 import SaveIndicator from "./components/SaveIndicator";
 
 function Header() {
@@ -36,6 +39,9 @@ function Shell() {
         {screen === "home" && <HomeScreen />}
         {screen === "lobby" && <PhysicianLobby />}
         {screen === "review" && <PatientReview />}
+        {screen === "patientSurvey" && <PatientSurvey />}
+        {screen === "completion" && <CompletionSurvey />}
+        {screen === "submitted" && <SubmissionScreen />}
       </div>
     </div>
   );

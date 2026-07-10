@@ -5,6 +5,7 @@ export default function PhysicianLobby() {
   if (!assignment) return null;
 
   const done = assignment.patients.filter((p) => p.status === "complete").length;
+  const allComplete = done === assignment.patients.length && assignment.patients.length > 0;
 
   return (
     <div className="lobby">
@@ -34,6 +35,16 @@ export default function PhysicianLobby() {
               </div>
             ))}
           </div>
+
+          <button
+            className="btn btn-success"
+            style={{ marginTop: 16, width: "100%", justifyContent: "center" }}
+            disabled={!allComplete}
+            onClick={actions.startCompletion}
+            title={allComplete ? "" : "Complete all assigned patients first"}
+          >
+            {allComplete ? "Finish & submit assignment" : `Complete all patients to submit (${done}/${assignment.patients.length})`}
+          </button>
         </div>
       </div>
     </div>
