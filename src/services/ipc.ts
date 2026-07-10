@@ -42,3 +42,70 @@ export interface ResponseReceipt {
   reviewerId: string;
   patientCount: number;
 }
+
+// ── Coordinator ──────────────────────────────────────────────────────────
+export interface CoordPatient {
+  id: string;
+  researchId: string | null;
+  displayLabel: string;
+  clinicalQuestion: string | null;
+  documentCount: number;
+  recommendationCount: number;
+}
+export interface CoordReviewer {
+  reviewerId: string;
+  displayName: string | null;
+  patientCount: number;
+}
+export interface CoordinatorSummary {
+  studyTitle: string;
+  provisioned: boolean;
+  patients: CoordPatient[];
+  reviewers: CoordReviewer[];
+  resultsCount: number;
+}
+export interface PackageReceipt {
+  sha256: string;
+  patientCount: number;
+  reviewerId: string;
+  assignmentId: string;
+}
+export interface ImportSummary {
+  reviewerId: string;
+  assignmentId: string;
+  patientCount: number;
+}
+export interface ResultRow {
+  assignmentId: string;
+  reviewerId: string;
+  submittedAt: string | null;
+  importedAt: string;
+}
+
+export const coordinatorIpc = {
+  openWorkspace: () => invoke<CoordinatorSummary>("coordinator_open_workspace"),
+  summary: () => invoke<CoordinatorSummary>("coordinator_summary"),
+  addPatient: (researchId: string, displayLabel: string, clinicalQuestion: string) =>
+    invoke<string>("coordinator_add_patient", { researchId, displayLabel, clinicalQuestion }),
+  addDocument: (patientId: string, documentType: string, filename: string, textContent: string) =>
+    invoke<void>("coordinator_add_document", { patientId, documentType, filename, textContent }),
+  importLlm: (patientId: string, rawJson: string) =>
+    invoke<number>("coordinator_import_llm", { patientId, rawJson }),
+  buildPackage: (
+    reviewerId: string,
+    displayName: string,
+    patientIds: string[],
+    password: string,
+    destination: string
+  ) =>
+    invoke<PackageReceipt>("coordinator_build_package", {
+      reviewerId,
+      displayName,
+      patientIds,
+      password,
+      destination,
+    }),
+  importResponse: (atbrPath: string) =>
+    invoke<ImportSummary>("coordinator_import_response", { atbrPath }),
+  listResults: () => invoke<ResultRow[]>("coordinator_list_results"),
+};

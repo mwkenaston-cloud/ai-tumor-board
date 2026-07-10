@@ -31,6 +31,7 @@ import { ipc, isTauri } from "../services/ipc";
 export type Screen =
   | "home"
   | "unlock"
+  | "coordinator"
   | "lobby"
   | "review"
   | "patientSurvey"
@@ -56,6 +57,8 @@ interface AppState {
 
 interface AppActions {
   enterReviewer: () => void;
+  enterCoordinator: () => void;
+  goHome: () => void;
   unlockAssignment: (path: string, password: string) => Promise<void>;
   useDemoAssignment: () => Promise<void>;
   openPatient: (patientId: string) => void;
@@ -198,6 +201,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPatients(seedPatients());
       setScreen("lobby");
     }
+  }, []);
+
+  const enterCoordinator = useCallback(() => {
+    setRole("coordinator");
+    setScreen("coordinator");
+  }, []);
+
+  const goHome = useCallback(() => {
+    setRole(null);
+    setAssignment(null);
+    setPatients({});
+    setCurrentPatientId(null);
+    setScreen("home");
   }, []);
 
   const unlockAssignment = useCallback(async (path: string, password: string) => {
@@ -423,6 +439,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const actions: AppActions = useMemo(
     () => ({
       enterReviewer,
+      enterCoordinator,
+      goHome,
       unlockAssignment,
       useDemoAssignment,
       openPatient,
@@ -439,6 +457,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       enterReviewer,
+      enterCoordinator,
+      goHome,
       unlockAssignment,
       useDemoAssignment,
       openPatient,

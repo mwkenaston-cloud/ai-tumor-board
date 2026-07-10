@@ -15,10 +15,10 @@ export default function HomeScreen() {
             <h3>Physician</h3>
             <p>Open an assignment, review assigned patients, and record your assessment.</p>
           </div>
-          <div className="role-card" style={{ opacity: 0.55, cursor: "not-allowed" }}>
+          <div className="role-card" onClick={actions.enterCoordinator}>
             <div className="role-icon">🗂️</div>
             <h3>Coordinator</h3>
-            <p>Build studies and assignment packages. (Available in a later phase.)</p>
+            <p>Build studies, import AI output, create assignment packages, and import responses.</p>
           </div>
         </div>
         <p style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 24 }}>
