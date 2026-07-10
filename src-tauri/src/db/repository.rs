@@ -13,6 +13,17 @@ fn json_from_text(s: Option<String>) -> Option<Value> {
 
 // ── Reads ────────────────────────────────────────────────────────────────
 
+/// The reviewer this package belongs to. Assignment packages contain exactly
+/// one reviewer; prefer a row explicitly marked as `reviewer`.
+pub fn first_reviewer_id(conn: &Connection) -> Result<String, DbError> {
+    conn.query_row(
+        "SELECT reviewer_id FROM reviewers ORDER BY (role = 'reviewer') DESC LIMIT 1",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(Into::into)
+}
+
 /// Load the assignment header + patient summaries for a reviewer.
 pub fn load_assignment(conn: &Connection, reviewer_id: &str) -> Result<Assignment, DbError> {
     let (study_id, title, protocol, schema_version, contact, instructions, settings_text): (

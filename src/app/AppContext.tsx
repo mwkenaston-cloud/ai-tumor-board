@@ -30,6 +30,7 @@ import { ipc, isTauri } from "../services/ipc";
 
 export type Screen =
   | "home"
+  | "unlock"
   | "lobby"
   | "review"
   | "patientSurvey"
@@ -55,6 +56,8 @@ interface AppState {
 
 interface AppActions {
   enterReviewer: () => void;
+  unlockAssignment: (path: string, password: string) => Promise<void>;
+  useDemoAssignment: () => Promise<void>;
   openPatient: (patientId: string) => void;
   backToLobby: () => void;
   setNoteBlocks: (patientId: string, blocks: NoteBlock[]) => void;
@@ -187,24 +190,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const enterReviewer = useCallback(() => {
     setRole("reviewer");
     if (isTauri()) {
-      ipc
-        .openDevAssignment()
-        .then((a) => {
-          setAssignment(a);
-          setPatients({});
-          setScreen("lobby");
-        })
-        .catch((e) => {
-          console.error("open_dev_assignment failed; falling back to seed", e);
-          setAssignment(seedAssignment());
-          setPatients(seedPatients());
-          setScreen("lobby");
-        });
+      // Real flow: prompt for the assignment file + password on the unlock screen.
+      setScreen("unlock");
     } else {
+      // Browser preview has no backend — use the synthetic seed.
       setAssignment(seedAssignment());
       setPatients(seedPatients());
       setScreen("lobby");
     }
+  }, []);
+
+  const unlockAssignment = useCallback(async (path: string, password: string) => {
+    const a = await ipc.openAssignment(path, password);
+    setRole("reviewer");
+    setAssignment(a);
+    setPatients({});
+    setScreen("lobby");
+  }, []);
+
+  const useDemoAssignment = useCallback(async () => {
+    const a = await ipc.openDevAssignment();
+    setRole("reviewer");
+    setAssignment(a);
+    setPatients({});
+    setScreen("lobby");
   }, []);
 
   const openPatient = useCallback(
@@ -414,6 +423,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const actions: AppActions = useMemo(
     () => ({
       enterReviewer,
+      unlockAssignment,
+      useDemoAssignment,
       openPatient,
       backToLobby,
       setNoteBlocks,
@@ -428,6 +439,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       enterReviewer,
+      unlockAssignment,
+      useDemoAssignment,
       openPatient,
       backToLobby,
       setNoteBlocks,

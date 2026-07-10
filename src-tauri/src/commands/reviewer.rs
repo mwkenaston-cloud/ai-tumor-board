@@ -48,6 +48,28 @@ pub fn open_dev_assignment(
     Ok(assignment)
 }
 
+/// Open a real assignment `.atb` with the reviewer's password. Wrong password,
+/// truncated, or tampered files fail here without exposing content.
+#[tauri::command]
+pub fn open_assignment(
+    state: State<SessionState>,
+    path: String,
+    password: String,
+) -> Result<Assignment, String> {
+    let pathbuf = std::path::PathBuf::from(&path);
+    let conn = container::open(&pathbuf, &password).map_err(map_err)?;
+    let reviewer_id = repo::first_reviewer_id(&conn).map_err(map_err)?;
+    let assignment = repo::load_assignment(&conn, &reviewer_id).map_err(map_err)?;
+    repo::append_audit(
+        &conn,
+        Some(&reviewer_id),
+        &AuditEvent { event_type: "ASSIGNMENT_OPENED".into(), patient_id: None, event_time: repo::now_iso(), payload: None },
+    )
+    .map_err(map_err)?;
+    *state.lock().unwrap() = Some(Session { conn, path: pathbuf, reviewer_id });
+    Ok(assignment)
+}
+
 fn with_session<T>(
     state: &State<SessionState>,
     f: impl FnOnce(&mut Session) -> Result<T, String>,

@@ -17,6 +17,8 @@ export function isTauri(): boolean {
 
 export const ipc = {
   openDevAssignment: () => invoke<Assignment>("open_dev_assignment"),
+  openAssignment: (path: string, password: string) =>
+    invoke<Assignment>("open_assignment", { path, password }),
   loadAssignment: () => invoke<Assignment>("load_assignment"),
   getPatient: (patientId: string) => invoke<Patient>("get_patient", { patientId }),
   openPatient: (patientId: string) => invoke<Patient>("open_patient", { patientId }),

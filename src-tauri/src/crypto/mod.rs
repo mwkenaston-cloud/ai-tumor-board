@@ -16,6 +16,8 @@
 
 pub mod container;
 pub mod key_derivation;
+pub mod response_seal;
+pub mod role_credential;
 
 /// Bumped only when the on-disk KDF/cipher parameters change.
 pub const FORMAT_VERSION: u16 = 1;

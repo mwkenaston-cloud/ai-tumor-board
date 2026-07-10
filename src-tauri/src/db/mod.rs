@@ -7,6 +7,7 @@
 
 pub mod connection;
 pub mod models;
+pub mod packaging;
 pub mod repository;
 pub mod seed;
 

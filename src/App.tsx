@@ -1,6 +1,7 @@
 import "./styles/app.css";
 import { AppProvider, useApp } from "./app/AppContext";
 import HomeScreen from "./screens/HomeScreen";
+import UnlockScreen from "./screens/UnlockScreen";
 import PhysicianLobby from "./screens/PhysicianLobby";
 import PatientReview from "./screens/PatientReview";
 import PatientSurvey from "./screens/PatientSurvey";
@@ -37,6 +38,7 @@ function Shell() {
       <Header />
       <div style={{ position: "relative", flex: 1, display: "flex", overflow: "hidden" }}>
         {screen === "home" && <HomeScreen />}
+        {screen === "unlock" && <UnlockScreen />}
         {screen === "lobby" && <PhysicianLobby />}
         {screen === "review" && <PatientReview />}
         {screen === "patientSurvey" && <PatientSurvey />}
