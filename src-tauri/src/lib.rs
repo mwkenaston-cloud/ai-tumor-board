@@ -1,4 +1,5 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod crypto;
 mod db;
 
 /// Report the SQLCipher version compiled into this build. Used as a startup

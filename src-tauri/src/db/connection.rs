@@ -18,12 +18,16 @@ pub enum DbError {
     NotEncrypted,
 }
 
-/// Format a 32-byte key as the SQLCipher raw-key pragma literal:
-/// `PRAGMA key = "x'<64 hex chars>'"`. Raw-key mode bypasses SQLCipher's own
-/// KDF because we derive the key ourselves with Argon2id.
-fn raw_key_pragma(key: &[u8; 32]) -> String {
-    let mut hex = String::with_capacity(64);
-    for b in key {
+/// Format raw key material as the SQLCipher raw-key pragma literal:
+/// `PRAGMA key = "x'<hex>'"`. Raw-key mode bypasses SQLCipher's own KDF because
+/// we derive the key ourselves with Argon2id.
+///
+/// Pass 32 bytes for key-only (SQLCipher manages a random header salt), or 48
+/// bytes (32-byte key ++ 16-byte salt) to pin the header salt explicitly — the
+/// latter lets us store our Argon2id salt in the file's plaintext header.
+fn raw_key_pragma(material: &[u8]) -> String {
+    let mut hex = String::with_capacity(material.len() * 2);
+    for b in material {
         use std::fmt::Write;
         let _ = write!(hex, "{:02x}", b);
     }
@@ -37,13 +41,32 @@ fn raw_key_pragma(key: &[u8; 32]) -> String {
 /// ciphertext) fails HMAC verification here and surfaces as `BadKeyOrCorrupt`
 /// rather than exposing any partial content.
 pub fn open_encrypted(path: &std::path::Path, key: &[u8; 32]) -> Result<Connection, DbError> {
+    open_with_material(path, key)
+}
+
+/// Open (or create) a SQLCipher database keyed with an explicit 32-byte key and
+/// 16-byte header salt. On create, SQLCipher writes `salt` to the first 16
+/// (plaintext) bytes of the file; on open, `salt` must match what is derived
+/// from the stored value. Used by the `.atb`/`.atbr` container layer.
+pub fn open_encrypted_with_salt(
+    path: &std::path::Path,
+    key: &[u8; 32],
+    salt: &[u8; 16],
+) -> Result<Connection, DbError> {
+    let mut material = Vec::with_capacity(48);
+    material.extend_from_slice(key);
+    material.extend_from_slice(salt);
+    open_with_material(path, &material)
+}
+
+fn open_with_material(path: &std::path::Path, material: &[u8]) -> Result<Connection, DbError> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    apply_key_and_verify(&conn, key)?;
+    apply_key_and_verify(&conn, material)?;
     Ok(conn)
 }
 
@@ -57,8 +80,8 @@ pub fn open_in_memory(key: &[u8; 32]) -> Result<Connection, DbError> {
     Ok(conn)
 }
 
-fn apply_key_and_verify(conn: &Connection, key: &[u8; 32]) -> Result<(), DbError> {
-    conn.execute_batch(&raw_key_pragma(key))?;
+fn apply_key_and_verify(conn: &Connection, material: &[u8]) -> Result<(), DbError> {
+    conn.execute_batch(&raw_key_pragma(material))?;
     ensure_sqlcipher(conn)?;
     // Touching the schema forces SQLCipher to decrypt & HMAC-verify page 1.
     match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get::<_, i64>(0)) {
@@ -79,6 +102,20 @@ fn ensure_sqlcipher(conn: &Connection) -> Result<(), DbError> {
         Some(v) if !v.is_empty() => Ok(()),
         _ => Err(DbError::NotEncrypted),
     }
+}
+
+/// Full-file integrity verification: `PRAGMA cipher_integrity_check` HMAC-checks
+/// every page and yields one row per problem. Any rows mean the file is
+/// corrupted or tampered (page-1 keying already caught a wrong password). Call
+/// this after opening an existing container so tampering in later data pages is
+/// detected up front rather than lazily when a bad page is first read.
+pub fn verify_integrity(conn: &Connection) -> Result<(), DbError> {
+    let mut stmt = conn.prepare("PRAGMA cipher_integrity_check")?;
+    let mut rows = stmt.query([])?;
+    if rows.next()?.is_some() {
+        return Err(DbError::BadKeyOrCorrupt);
+    }
+    Ok(())
 }
 
 /// Return the SQLCipher version string (e.g. "4.6.1 community").
