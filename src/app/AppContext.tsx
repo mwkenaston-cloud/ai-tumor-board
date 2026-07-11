@@ -72,6 +72,8 @@ interface AppActions {
     recommendationId: string,
     reason?: string
   ) => void;
+  undoInsert: (patientId: string, recommendationId: string) => void;
+  undoDismiss: (patientId: string, recommendationId: string) => void;
   removeBlock: (patientId: string, blockId: string) => void;
   completePatient: (patientId: string) => void;
   submitPatientSurvey: (patientId: string, answers: Record<string, string>) => void;
@@ -372,6 +374,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [updatePatient, persistDecision]
   );
 
+  // Undo an insertion: remove the AI block(s) for this rec and reset to pending.
+  const undoInsert = useCallback(
+    (patientId: string, recommendationId: string) => {
+      updatePatient(patientId, (p) => ({
+        ...p,
+        noteBlocks: reindex(
+          p.noteBlocks.filter(
+            (b) => !(b.type === "ai" && b.recommendationId === recommendationId)
+          )
+        ),
+        decisions: p.decisions.filter((d) => d.recommendationId !== recommendationId),
+      }));
+      persistDecision(patientId, recommendationId, {
+        status: "pending",
+        finalText: null,
+        decidedAt: null,
+      });
+    },
+    [updatePatient, persistDecision]
+  );
+
+  // Undo a dismissal: reset the decision back to pending.
+  const undoDismiss = useCallback(
+    (patientId: string, recommendationId: string) => {
+      updatePatient(patientId, (p) => ({
+        ...p,
+        decisions: p.decisions.filter((d) => d.recommendationId !== recommendationId),
+      }));
+      persistDecision(patientId, recommendationId, {
+        status: "pending",
+        dismissalReason: null,
+        decidedAt: null,
+      });
+    },
+    [updatePatient, persistDecision]
+  );
+
   const removeBlock = useCallback(
     (patientId: string, blockId: string) => {
       const removed = patientsRef.current[patientId]?.noteBlocks.find((b) => b.id === blockId);
@@ -476,6 +515,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       appendUserBlock,
       insertRecommendation,
       dismissRecommendation,
+      undoInsert,
+      undoDismiss,
       removeBlock,
       completePatient,
       submitPatientSurvey,
@@ -494,6 +535,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       appendUserBlock,
       insertRecommendation,
       dismissRecommendation,
+      undoInsert,
+      undoDismiss,
       removeBlock,
       completePatient,
       submitPatientSurvey,

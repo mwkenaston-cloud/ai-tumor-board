@@ -35,7 +35,15 @@ export default function CompletionSurvey() {
           <button
             className="btn btn-success"
             disabled={!complete}
-            onClick={() => actions.submitAssignment(answers)}
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Submit your completed assignment? This finalizes your responses and generates the encrypted response file to return to the study team."
+                )
+              ) {
+                actions.submitAssignment(answers);
+              }
+            }}
           >
             Submit assignment
           </button>

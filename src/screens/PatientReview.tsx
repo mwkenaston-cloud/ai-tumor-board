@@ -86,6 +86,8 @@ export default function PatientReview() {
                     settings={settings}
                     onInsert={() => actions.insertRecommendation(p.id, rec.id)}
                     onDismiss={() => actions.dismissRecommendation(p.id, rec.id)}
+                    onUndoInsert={() => actions.undoInsert(p.id, rec.id)}
+                    onUndoDismiss={() => actions.undoDismiss(p.id, rec.id)}
                   />
                 ))}
                 {p.recommendations.length === 0 && (

@@ -36,6 +36,8 @@ export const ipc = {
     invoke<void>("submit_assignment", { generalAnswers }),
   exportResponse: (destination: string) =>
     invoke<ResponseReceipt>("export_response", { destination }),
+  exportResponseToDownloads: () =>
+    invoke<ExportedResponse>("export_response_to_downloads"),
   cipherVersion: () => invoke<string | null>("cipher_version"),
 };
 
@@ -43,6 +45,14 @@ export interface ResponseReceipt {
   sha256: string;
   reviewerId: string;
   patientCount: number;
+}
+
+export interface ExportedResponse {
+  sha256: string;
+  reviewerId: string;
+  patientCount: number;
+  path: string;
+  filename: string;
 }
 
 // ── Coordinator ──────────────────────────────────────────────────────────

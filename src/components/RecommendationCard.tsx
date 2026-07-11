@@ -18,6 +18,8 @@ interface Props {
   settings: StudySettings;
   onInsert: () => void;
   onDismiss: () => void;
+  onUndoInsert: () => void;
+  onUndoDismiss: () => void;
 }
 
 export default function RecommendationCard({
@@ -26,6 +28,8 @@ export default function RecommendationCard({
   settings,
   onInsert,
   onDismiss,
+  onUndoInsert,
+  onUndoDismiss,
 }: Props) {
   const [open, setOpen] = useState(false);
   const status = decision?.status ?? "pending";
@@ -114,13 +118,25 @@ export default function RecommendationCard({
       )}
 
       <div className="rec-actions">
-        <button className="btn btn-primary btn-sm" onClick={onInsert}>
-          Insert into note
-        </button>
-        {settings.allowDismiss && status !== "dismissed" && (
-          <button className="btn btn-ghost btn-sm" onClick={onDismiss}>
-            Dismiss
+        {status === "used" || status === "used-and-edited" ? (
+          <button className="btn btn-warning btn-sm" onClick={onUndoInsert}>
+            Remove from note
           </button>
+        ) : status === "dismissed" ? (
+          <button className="btn btn-ghost btn-sm" onClick={onUndoDismiss}>
+            Undo dismiss
+          </button>
+        ) : (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={onInsert}>
+              Insert into note
+            </button>
+            {settings.allowDismiss && (
+              <button className="btn btn-ghost btn-sm" onClick={onDismiss}>
+                Dismiss
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

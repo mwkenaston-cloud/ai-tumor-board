@@ -243,6 +243,53 @@ pub fn export_response(
     })
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportedResponse {
+    pub sha256: String,
+    pub reviewer_id: String,
+    pub patient_count: usize,
+    pub path: String,
+    pub filename: String,
+}
+
+/// Auto-export the sealed `.atbr` to the user's Downloads folder (falling back
+/// to Documents), returning where it was written so the UI can tell the reviewer
+/// to email it back.
+#[tauri::command]
+pub fn export_response_to_downloads(
+    app: AppHandle,
+    state: State<SessionState>,
+) -> Result<ExportedResponse, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().document_dir())
+        .map_err(map_err)?;
+    let _ = std::fs::create_dir_all(&dir);
+    with_session(&state, |s| {
+        let assignment_id = repo::get_metadata(&s.conn, "assignment_id")
+            .map_err(map_err)?
+            .ok_or("assignment is missing an assignment id")?;
+        let pub_hex = repo::get_metadata(&s.conn, "coordinator_public_hex")
+            .map_err(map_err)?
+            .ok_or("assignment has no coordinator key; rebuild the package")?;
+        let pubkey = hex32(&pub_hex).ok_or("coordinator key is malformed")?;
+        let date = chrono::Utc::now().format("%Y-%m-%d");
+        let filename = format!("TumorBoard_Response_{}_{}.atbr", s.reviewer_id, date);
+        let dest = dir.join(&filename);
+        let receipt = response::build_response(&s.conn, &s.path, &dest, &assignment_id, &pubkey)
+            .map_err(map_err)?;
+        Ok(ExportedResponse {
+            sha256: receipt.sha256,
+            reviewer_id: receipt.reviewer_id,
+            patient_count: receipt.patient_count,
+            path: dest.to_string_lossy().to_string(),
+            filename,
+        })
+    })
+}
+
 fn hex32(s: &str) -> Option<[u8; 32]> {
     if s.len() != 64 {
         return None;

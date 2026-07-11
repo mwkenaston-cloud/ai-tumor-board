@@ -39,6 +39,7 @@ pub fn run() {
             reviewer::save_survey,
             reviewer::submit_assignment,
             reviewer::export_response,
+            reviewer::export_response_to_downloads,
             coordinator::coordinator_open_workspace,
             coordinator::coordinator_summary,
             coordinator::coordinator_add_patient,
