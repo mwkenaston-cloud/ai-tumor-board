@@ -92,6 +92,8 @@ export const coordinatorIpc = {
     invoke<void>("coordinator_remove_patient", { patientId }),
   addDocument: (patientId: string, documentType: string, filename: string, textContent: string) =>
     invoke<void>("coordinator_add_document", { patientId, documentType, filename, textContent }),
+  importDocumentFile: (patientId: string, path: string) =>
+    invoke<number>("coordinator_import_document_file", { patientId, path }),
   importLlm: (patientId: string, rawJson: string) =>
     invoke<number>("coordinator_import_llm", { patientId, rawJson }),
   buildPackage: (

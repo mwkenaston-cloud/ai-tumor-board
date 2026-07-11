@@ -210,6 +210,41 @@ pub fn coordinator_add_document(
     })
 }
 
+/// Import a single combined clinical-source `.txt`, splitting it into per-type
+/// documents (imaging / clinical notes / pathology / labs). Replaces any
+/// existing documents for the patient. Returns the number of sections stored.
+#[tauri::command]
+pub fn coordinator_import_document_file(
+    state: State<CoordinatorState>,
+    patient_id: String,
+    path: String,
+) -> Result<usize, String> {
+    let text = std::fs::read_to_string(&path).map_err(map_err)?;
+    let sections = crate::db::document_import::parse_combined(&text);
+    if sections.is_empty() {
+        return Err("No recognized sections found (expected 'Txt Imaging', 'Txt Clinical Notes', 'Txt Pathology', 'Txt Labs').".into());
+    }
+    with_session(&state, |s| {
+        let tx = s.conn.transaction().map_err(map_err)?;
+        tx.execute("DELETE FROM source_documents WHERE patient_id = ?1", params![patient_id]).map_err(map_err)?;
+        for sec in &sections {
+            let mut h = Sha256::new();
+            h.update(sec.content.as_bytes());
+            let sha = hex_encode(&h.finalize());
+            tx.execute(
+                "INSERT INTO source_documents(document_id, patient_id, document_type, filename, mime_type, text_content, byte_size, sha256, created_at)
+                 VALUES (?1,?2,?3,?4,'text/plain',?5,?6,?7,?8)",
+                params![
+                    uuid::Uuid::new_v4().to_string(), patient_id, sec.document_type,
+                    format!("{}.txt", sec.document_type), sec.content, sec.content.len() as i64, sha, now_iso()
+                ],
+            ).map_err(map_err)?;
+        }
+        tx.commit().map_err(map_err)?;
+        Ok(sections.len())
+    })
+}
+
 /// Validate + normalize + store LLM output for a patient. Returns the count of
 /// normalized recommendations.
 #[tauri::command]

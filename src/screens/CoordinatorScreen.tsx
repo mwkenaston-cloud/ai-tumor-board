@@ -233,22 +233,24 @@ function PatientRow({ patient, active, onSelect, onRemove }: { patient: CoordPat
 }
 
 function PatientDetail({ patient, onChanged }: { patient: CoordPatient; onChanged: () => void }) {
-  const [docType, setDocType] = useState("notes");
-  const [docText, setDocText] = useState("");
   const [llm, setLlm] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const addDoc = async () => {
-    if (!docText.trim()) return;
+  const uploadCombined = async () => {
     setErr(null); setMsg(null);
+    const selected = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Clinical source text", extensions: ["txt"] }],
+    });
+    if (typeof selected !== "string") return;
     try {
-      await coordinatorIpc.addDocument(patient.id, docType, `${docType}.txt`, docText);
-      setDocText("");
-      setMsg("Document added.");
+      const n = await coordinatorIpc.importDocumentFile(patient.id, selected);
+      setMsg(`Imported ${n} document section${n === 1 ? "" : "s"}.`);
       onChanged();
     } catch (e) {
-      setErr(String(e));
+      setErr(String(e).replace(/^.*Error: /, ""));
     }
   };
 
@@ -270,17 +272,15 @@ function PatientDetail({ patient, onChanged }: { patient: CoordPatient; onChange
         {patient.researchId ?? patient.id} · {patient.cancerType ?? patient.modelId ?? "—"}
       </div>
 
-      <div className="field-label">Add source document</div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-        <select className="text-input" style={{ maxWidth: 130 }} value={docType} onChange={(e) => setDocType(e.currentTarget.value)}>
-          <option value="notes">Notes</option>
-          <option value="pathology">Pathology</option>
-          <option value="imaging">Imaging</option>
-          <option value="labs">Labs</option>
-        </select>
-        <button className="btn btn-ghost btn-sm" disabled={!docText.trim()} onClick={addDoc}>Add</button>
+      <div className="field-label">Source documents</div>
+      <div style={{ fontSize: 11, color: "var(--muted-2)", marginBottom: 6 }}>
+        Upload one combined <code>.txt</code>. Sections are split by headers
+        “Txt Imaging”, “Txt Clinical Notes”, “Txt Pathology”, “Txt Labs”.
+        {patient.documentCount > 0 && ` Currently ${patient.documentCount} section(s) stored (re-upload replaces).`}
       </div>
-      <textarea className="text-input" style={{ minHeight: 60, resize: "vertical", marginBottom: 12 }} placeholder="Paste de-identified document text…" value={docText} onChange={(e) => setDocText(e.currentTarget.value)} />
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12 }} onClick={uploadCombined}>
+        📄 Upload combined source file…
+      </button>
 
       <div className="field-label">Import AI output (JSON)</div>
       <textarea className="text-input" style={{ minHeight: 80, resize: "vertical", fontFamily: "var(--font-mono)", fontSize: 11 }} placeholder='{"session_metadata": {...}, "phase3_recommendations": [...]}' value={llm} onChange={(e) => setLlm(e.currentTarget.value)} />

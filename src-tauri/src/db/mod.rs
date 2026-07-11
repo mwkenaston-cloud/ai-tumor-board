@@ -6,6 +6,7 @@
 //! (see `crate::crypto`) and handed to SQLCipher in raw-key mode.
 
 pub mod connection;
+pub mod document_import;
 pub mod llm_import;
 pub mod metrics;
 pub mod models;
