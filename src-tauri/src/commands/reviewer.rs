@@ -127,6 +127,19 @@ pub fn save_note_blocks(
     })
 }
 
+/// Persist accumulated review time for a patient (called when leaving the
+/// review screen without completing, so time survives queue in/out).
+#[tauri::command]
+pub fn save_elapsed(
+    state: State<SessionState>,
+    patient_id: String,
+    elapsed_seconds: i64,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        repo::set_elapsed(&s.conn, &patient_id, elapsed_seconds).map_err(map_err)
+    })
+}
+
 #[tauri::command]
 pub fn save_decision(
     state: State<SessionState>,

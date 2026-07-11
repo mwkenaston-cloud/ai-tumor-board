@@ -20,7 +20,17 @@ export default function PatientReview() {
   const [tab, setTab] = useState<Tab>("patient");
   if (!currentPatient || !assignment) return null;
   const p = currentPatient;
-  const settings = assignment.settings;
+  // Guard against a study with no settings (e.g., an older package): default to
+  // showing everything rather than crashing on undefined toggles.
+  const settings =
+    assignment.settings ?? ({
+      showPriority: true,
+      showEvidence: true,
+      showSafety: true,
+      showTemperature: true,
+      showDetails: true,
+      allowDismiss: true,
+    } as typeof assignment.settings);
 
   const decisionFor = (recId: string) => p.decisions.find((d) => d.recommendationId === recId);
   const metrics = attributionMetrics(p.noteBlocks);

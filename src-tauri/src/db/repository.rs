@@ -330,6 +330,16 @@ pub fn set_patient_status(
     Ok(())
 }
 
+/// Persist accumulated review time without changing status (used when a
+/// reviewer steps out to the queue and back).
+pub fn set_elapsed(conn: &Connection, patient_id: &str, elapsed_seconds: i64) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE patients SET elapsed_seconds = ?2 WHERE patient_id = ?1",
+        params![patient_id, elapsed_seconds],
+    )?;
+    Ok(())
+}
+
 pub fn set_assignment_state(
     conn: &Connection,
     reviewer_id: &str,

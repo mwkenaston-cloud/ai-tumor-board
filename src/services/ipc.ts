@@ -24,6 +24,8 @@ export const ipc = {
   openPatient: (patientId: string) => invoke<Patient>("open_patient", { patientId }),
   saveNoteBlocks: (patientId: string, blocks: NoteBlock[]) =>
     invoke<void>("save_note_blocks", { patientId, blocks }),
+  saveElapsed: (patientId: string, elapsedSeconds: number) =>
+    invoke<void>("save_elapsed", { patientId, elapsedSeconds }),
   saveDecision: (decision: RecommendationDecision) =>
     invoke<void>("save_decision", { decision }),
   completePatient: (patientId: string, elapsedSeconds: number) =>

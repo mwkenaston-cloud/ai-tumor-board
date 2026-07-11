@@ -108,11 +108,18 @@ pub fn coordinator_open_workspace(
     } else {
         let c = container::create(&path, DEV_WORKSPACE_PASSWORD, ContainerRole::Coordinator)
             .map_err(map_err)?;
-        // Default study + a coordinator X25519 keypair for sealing responses.
+        // Default study (with sensible display settings so reviewer views show
+        // all badges) + a coordinator X25519 keypair for sealing responses.
+        let default_settings = serde_json::json!({
+            "showPriority": true, "showEvidence": true, "showSafety": true,
+            "showTemperature": true, "showDetails": true, "allowDismiss": true,
+            "showTimer": false, "perPatientSurvey": true, "generalSurvey": true
+        })
+        .to_string();
         c.execute(
-            "INSERT OR REPLACE INTO studies(study_id, title, protocol_version, schema_version, created_at)
-             VALUES ('STUDY-1', 'New Study', 'v1', 1, ?1)",
-            [now_iso()],
+            "INSERT OR REPLACE INTO studies(study_id, title, protocol_version, schema_version, settings_json, created_at)
+             VALUES ('STUDY-1', 'New Study', 'v1', 1, ?1, ?2)",
+            params![default_settings, now_iso()],
         )
         .map_err(|e| map_err(e))?;
         let (secret, public) = response_seal::generate_keypair();

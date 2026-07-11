@@ -288,9 +288,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const backToLobby = useCallback(() => {
+    // Persist accumulated review time so it survives leaving/re-entering the
+    // queue, and mirror it locally so a re-open resumes from where we left off.
+    if (currentPatientId) {
+      const pid = currentPatientId;
+      if (isTauri()) {
+        ipc.saveElapsed(pid, reviewSeconds).catch((e) => console.error("save_elapsed failed", e));
+      }
+      setPatients((prev) =>
+        prev[pid] ? { ...prev, [pid]: { ...prev[pid], elapsedSeconds: reviewSeconds } } : prev
+      );
+    }
     setScreen("lobby");
     setCurrentPatientId(null);
-  }, []);
+  }, [currentPatientId, reviewSeconds]);
 
   const setNoteBlocks = useCallback(
     (patientId: string, blocks: NoteBlock[]) => {

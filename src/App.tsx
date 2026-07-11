@@ -10,14 +10,8 @@ import CompletionSurvey from "./screens/CompletionSurvey";
 import SubmissionScreen from "./screens/SubmissionScreen";
 import SaveIndicator from "./components/SaveIndicator";
 
-function formatClock(total: number): string {
-  const m = Math.floor(total / 60).toString().padStart(2, "0");
-  const s = (total % 60).toString().padStart(2, "0");
-  return `${m}:${s}`;
-}
-
 function Header() {
-  const { role, screen, assignment, reviewSeconds } = useApp();
+  const { role, screen, assignment } = useApp();
   return (
     <header className="header">
       <div className="header-left">
@@ -33,10 +27,7 @@ function Header() {
           </span>
         )}
       </div>
-      <div className="header-right">
-        {screen === "review" && <span className="timer">{formatClock(reviewSeconds)}</span>}
-        {screen === "review" && <SaveIndicator />}
-      </div>
+      <div className="header-right">{screen === "review" && <SaveIndicator />}</div>
     </header>
   );
 }

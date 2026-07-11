@@ -64,8 +64,8 @@ export default function PatientContextView({ patient }: { patient: Patient }) {
 
   return (
     <div className="review">
-      <SourceDocumentViewer patient={patient} />
-      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", background: "var(--surface-2)" }}>
+      {/* Left half: timeline + patient history */}
+      <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "16px 20px", background: "var(--surface-2)", borderRight: "1px solid var(--border-2)" }}>
         {ctx.patient_profile && (
           <Section title="Patient profile">
             <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>{ctx.patient_profile}</div>
@@ -81,6 +81,9 @@ export default function PatientContextView({ patient }: { patient: Patient }) {
           <KeyValueList items={famCancer} fields={["relative", "cancer_type", "age_at_diagnosis", "source_quote"]} />
         </Section>
       </div>
+
+      {/* Right half: raw source documents */}
+      <SourceDocumentViewer patient={patient} fill />
     </div>
   );
 }

@@ -33,6 +33,7 @@ pub fn run() {
             reviewer::get_patient,
             reviewer::open_patient,
             reviewer::save_note_blocks,
+            reviewer::save_elapsed,
             reviewer::save_decision,
             reviewer::complete_patient,
             reviewer::save_survey,

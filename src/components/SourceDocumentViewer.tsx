@@ -9,7 +9,13 @@ const TAB_LABEL: Record<string, string> = {
   labs: "Labs",
 };
 
-export default function SourceDocumentViewer({ patient }: { patient: Patient }) {
+export default function SourceDocumentViewer({
+  patient,
+  fill = false,
+}: {
+  patient: Patient;
+  fill?: boolean;
+}) {
   const types = Array.from(new Set(patient.documents.map((d) => d.documentType))).sort(
     (a, b) => TAB_ORDER.indexOf(a) - TAB_ORDER.indexOf(b)
   );
@@ -17,7 +23,7 @@ export default function SourceDocumentViewer({ patient }: { patient: Patient }) 
   const doc = patient.documents.find((d) => d.documentType === active);
 
   return (
-    <div className="left-panel">
+    <div className="left-panel" style={fill ? { flex: 1, width: "auto", minWidth: 0 } : undefined}>
       <div className="cq-block">
         <span className="field-label">Clinical question</span>
         <div className="cq-text">{patient.clinicalQuestion ?? "—"}</div>
