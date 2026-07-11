@@ -47,7 +47,8 @@ export interface ResponseReceipt {
 export interface CoordPatient {
   id: string;
   researchId: string | null;
-  displayLabel: string;
+  modelId: string | null;
+  cancerType: string | null;
   clinicalQuestion: string | null;
   documentCount: number;
   recommendationCount: number;
@@ -85,8 +86,10 @@ export interface ResultRow {
 export const coordinatorIpc = {
   openWorkspace: () => invoke<CoordinatorSummary>("coordinator_open_workspace"),
   summary: () => invoke<CoordinatorSummary>("coordinator_summary"),
-  addPatient: (researchId: string, displayLabel: string, clinicalQuestion: string) =>
-    invoke<string>("coordinator_add_patient", { researchId, displayLabel, clinicalQuestion }),
+  addPatient: (researchId: string, modelId: string) =>
+    invoke<string>("coordinator_add_patient", { researchId, modelId }),
+  removePatient: (patientId: string) =>
+    invoke<void>("coordinator_remove_patient", { patientId }),
   addDocument: (patientId: string, documentType: string, filename: string, textContent: string) =>
     invoke<void>("coordinator_add_document", { patientId, documentType, filename, textContent }),
   importLlm: (patientId: string, rawJson: string) =>

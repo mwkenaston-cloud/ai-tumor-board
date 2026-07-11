@@ -33,7 +33,9 @@ pub fn open_dev_assignment(
     state: State<SessionState>,
 ) -> Result<Assignment, String> {
     let reviewer_id = "REV-004".to_string();
-    let path = app_data_file(&app, "dev-assignment.atb")?;
+    // Filename carries the schema version so a stale dev file from an older
+    // schema is simply ignored rather than failing to open.
+    let path = app_data_file(&app, "dev-assignment-v2.atb")?;
 
     let fresh = !path.exists();
     let conn = if fresh {

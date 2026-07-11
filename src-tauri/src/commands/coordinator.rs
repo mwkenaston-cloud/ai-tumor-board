@@ -67,7 +67,8 @@ pub struct CoordinatorSummary {
 pub struct CoordPatient {
     pub id: String,
     pub research_id: Option<String>,
-    pub display_label: String,
+    pub model_id: Option<String>,
+    pub cancer_type: Option<String>,
     pub clinical_question: Option<String>,
     pub document_count: i64,
     pub recommendation_count: i64,
@@ -100,7 +101,7 @@ pub fn coordinator_open_workspace(
 
     let dir = app.path().app_data_dir().map_err(map_err)?;
     std::fs::create_dir_all(&dir).map_err(map_err)?;
-    let path = dir.join("coordinator-workspace.atb");
+    let path = dir.join("coordinator-workspace-v2.atb");
 
     let conn = if path.exists() {
         container::open(&path, DEV_WORKSPACE_PASSWORD).map_err(map_err)?
@@ -139,8 +140,7 @@ pub fn coordinator_summary(
 pub fn coordinator_add_patient(
     state: State<CoordinatorState>,
     research_id: String,
-    display_label: String,
-    clinical_question: String,
+    model_id: String,
 ) -> Result<String, String> {
     with_session(&state, |s| {
         let count: i64 = s
@@ -148,14 +148,39 @@ pub fn coordinator_add_patient(
             .query_row("SELECT count(*) FROM patients", [], |r| r.get(0))
             .map_err(map_err)?;
         let patient_id = format!("PT-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        // display_label defaults to the model id until the LLM import fills in a
+        // cancer type; clinical_question/context arrive with the LLM import.
         s.conn
             .execute(
-                "INSERT INTO patients(patient_id, study_id, research_id, display_label, clinical_question, position, status, elapsed_seconds)
-                 VALUES (?1, 'STUDY-1', ?2, ?3, ?4, ?5, 'not_started', 0)",
-                params![patient_id, research_id, display_label, clinical_question, count],
+                "INSERT INTO patients(patient_id, study_id, research_id, model_id, display_label, position, status, elapsed_seconds)
+                 VALUES (?1, 'STUDY-1', ?2, ?3, ?3, ?4, 'not_started', 0)",
+                params![patient_id, research_id, model_id, count],
             )
             .map_err(map_err)?;
         Ok(patient_id)
+    })
+}
+
+/// Remove a patient and all of its dependent rows from the workspace.
+#[tauri::command]
+pub fn coordinator_remove_patient(
+    state: State<CoordinatorState>,
+    patient_id: String,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        let tx = s.conn.transaction().map_err(map_err)?;
+        // Remove decisions tied to this patient's recommendations first (FK order).
+        tx.execute(
+            "DELETE FROM recommendation_decisions WHERE recommendation_id IN
+                (SELECT recommendation_id FROM recommendations WHERE patient_id = ?1)",
+            params![patient_id],
+        ).map_err(map_err)?;
+        for table in ["note_blocks", "recommendations", "llm_runs", "source_documents", "reviewer_assignments", "survey_responses", "audit_events"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE patient_id = ?1"), params![patient_id]).map_err(map_err)?;
+        }
+        tx.execute("DELETE FROM patients WHERE patient_id = ?1", params![patient_id]).map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        Ok(())
     })
 }
 
@@ -331,7 +356,7 @@ fn build_summary(conn: &Connection, provisioned: bool) -> Result<CoordinatorSumm
         .unwrap_or_else(|_| "New Study".to_string());
 
     let mut ps = conn.prepare(
-        "SELECT p.patient_id, p.research_id, p.display_label, p.clinical_question,
+        "SELECT p.patient_id, p.research_id, p.model_id, p.cancer_type, p.clinical_question,
                 (SELECT count(*) FROM source_documents d WHERE d.patient_id = p.patient_id),
                 (SELECT count(*) FROM recommendations r WHERE r.patient_id = p.patient_id)
          FROM patients p ORDER BY p.position",
@@ -341,10 +366,11 @@ fn build_summary(conn: &Connection, provisioned: bool) -> Result<CoordinatorSumm
             Ok(CoordPatient {
                 id: r.get(0)?,
                 research_id: r.get(1)?,
-                display_label: r.get(2)?,
-                clinical_question: r.get(3)?,
-                document_count: r.get(4)?,
-                recommendation_count: r.get(5)?,
+                model_id: r.get(2)?,
+                cancer_type: r.get(3)?,
+                clinical_question: r.get(4)?,
+                document_count: r.get(5)?,
+                recommendation_count: r.get(6)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

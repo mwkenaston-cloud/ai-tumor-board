@@ -72,8 +72,14 @@ pub struct NoteBlock {
 pub struct Patient {
     pub id: String,
     pub research_id: Option<String>,
+    pub model_id: Option<String>,
     pub display_label: String,
     pub clinical_question: Option<String>,
+    pub cancer_type: Option<String>,
+    /// Phase-1 context (patient_profile, timeline, comorbidities, family history).
+    pub context: Option<serde_json::Value>,
+    /// Phase-2 framing (decision_points, specialist_perspectives).
+    pub framing: Option<serde_json::Value>,
     pub position: i64,
     pub status: String,
     pub started_at: Option<String>,
@@ -90,6 +96,7 @@ pub struct Patient {
 pub struct PatientSummary {
     pub id: String,
     pub research_id: Option<String>,
+    pub model_id: Option<String>,
     pub display_label: String,
     pub position: i64,
     pub status: String,

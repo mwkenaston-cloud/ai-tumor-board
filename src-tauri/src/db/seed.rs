@@ -132,10 +132,10 @@ fn seed_patient(
     now: &str,
 ) -> Result<(), DbError> {
     conn.execute(
-        "INSERT OR REPLACE INTO patients(patient_id, study_id, research_id, display_label,
-             clinical_question, position, status, elapsed_seconds)
-         VALUES (?1, 'STUDY-1', ?2, ?3, ?4, ?5, 'not_started', 0)",
-        params![patient_id, research_id, label, clinical_question, position],
+        "INSERT OR REPLACE INTO patients(patient_id, study_id, research_id, model_id, display_label,
+             clinical_question, cancer_type, position, status, elapsed_seconds)
+         VALUES (?1, 'STUDY-1', ?2, 'demo-model-v1', ?3, ?4, ?5, ?6, 'not_started', 0)",
+        params![patient_id, research_id, label, clinical_question, label, position],
     )?;
     conn.execute(
         "INSERT OR REPLACE INTO reviewer_assignments(reviewer_id, patient_id, position)

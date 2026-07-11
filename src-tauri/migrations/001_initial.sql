@@ -36,8 +36,16 @@ CREATE TABLE patients (
     patient_id        TEXT PRIMARY KEY,
     study_id          TEXT NOT NULL,
     research_id       TEXT,
-    display_label     TEXT NOT NULL,
+    -- model_id identifies which AI model/config produced this case's output.
+    model_id          TEXT,
+    display_label     TEXT NOT NULL,   -- shown label (defaults to model_id)
     clinical_question TEXT,
+    cancer_type       TEXT,            -- from LLM session_metadata
+    -- Phase-1 patient context (patient_profile, timeline, comorbidities,
+    -- family history/genetics) as a JSON blob, populated on LLM import.
+    context_json      TEXT,
+    -- Phase-2 framing (decision_points, specialist_perspectives) as JSON.
+    framing_json      TEXT,
     position          INTEGER NOT NULL,
     status            TEXT NOT NULL DEFAULT 'not_started',
                       -- 'not_started'|'in_progress'|'complete'|'reopened'

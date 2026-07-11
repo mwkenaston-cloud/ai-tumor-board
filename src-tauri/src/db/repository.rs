@@ -64,7 +64,7 @@ pub fn load_assignment(conn: &Connection, reviewer_id: &str) -> Result<Assignmen
     )?;
 
     let mut stmt = conn.prepare(
-        "SELECT p.patient_id, p.research_id, p.display_label, ra.position, p.status, p.elapsed_seconds
+        "SELECT p.patient_id, p.research_id, p.model_id, p.display_label, ra.position, p.status, p.elapsed_seconds
          FROM patients p
          JOIN reviewer_assignments ra ON ra.patient_id = p.patient_id
          WHERE ra.reviewer_id = ?1
@@ -75,10 +75,11 @@ pub fn load_assignment(conn: &Connection, reviewer_id: &str) -> Result<Assignmen
             Ok(PatientSummary {
                 id: r.get(0)?,
                 research_id: r.get(1)?,
-                display_label: r.get(2)?,
-                position: r.get(3)?,
-                status: r.get(4)?,
-                elapsed_seconds: r.get(5)?,
+                model_id: r.get(2)?,
+                display_label: r.get(3)?,
+                position: r.get(4)?,
+                status: r.get(5)?,
+                elapsed_seconds: r.get(6)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -105,16 +106,17 @@ pub fn load_patient(
     reviewer_id: &str,
     patient_id: &str,
 ) -> Result<Patient, DbError> {
-    let (research_id, display_label, clinical_question, position, status, started_at, completed_at, elapsed): (
-        Option<String>, String, Option<String>, i64, String, Option<String>, Option<String>, i64,
+    let (research_id, model_id, display_label, clinical_question, cancer_type, context_text, framing_text, position, status, started_at, completed_at, elapsed): (
+        Option<String>, Option<String>, String, Option<String>, Option<String>, Option<String>, Option<String>, i64, String, Option<String>, Option<String>, i64,
     ) = conn.query_row(
-        "SELECT p.research_id, p.display_label, p.clinical_question, ra.position, p.status,
+        "SELECT p.research_id, p.model_id, p.display_label, p.clinical_question, p.cancer_type,
+                p.context_json, p.framing_json, ra.position, p.status,
                 p.started_at, p.completed_at, p.elapsed_seconds
          FROM patients p
          JOIN reviewer_assignments ra ON ra.patient_id = p.patient_id AND ra.reviewer_id = ?2
          WHERE p.patient_id = ?1",
         params![patient_id, reviewer_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?)),
     )?;
 
     let documents = load_documents(conn, patient_id)?;
@@ -125,8 +127,12 @@ pub fn load_patient(
     Ok(Patient {
         id: patient_id.to_string(),
         research_id,
+        model_id,
         display_label,
         clinical_question,
+        cancer_type,
+        context: json_from_text(context_text),
+        framing: json_from_text(framing_text),
         position,
         status,
         started_at,

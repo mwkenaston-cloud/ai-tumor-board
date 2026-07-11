@@ -41,6 +41,7 @@ pub fn run() {
             coordinator::coordinator_open_workspace,
             coordinator::coordinator_summary,
             coordinator::coordinator_add_patient,
+            coordinator::coordinator_remove_patient,
             coordinator::coordinator_add_document,
             coordinator::coordinator_import_llm,
             coordinator::coordinator_build_package,

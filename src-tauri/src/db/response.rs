@@ -316,13 +316,13 @@ fn copy_reviewer_output(
 
     for (pid, pos) in &assigned {
         let p = src.query_row(
-            "SELECT study_id, research_id, display_label, clinical_question, status, started_at, completed_at, elapsed_seconds FROM patients WHERE patient_id = ?1",
+            "SELECT study_id, research_id, model_id, display_label, clinical_question, cancer_type, status, started_at, completed_at, elapsed_seconds FROM patients WHERE patient_id = ?1",
             [pid],
-            |r| Ok((r.get::<_,String>(0)?, r.get::<_,Option<String>>(1)?, r.get::<_,String>(2)?, r.get::<_,Option<String>>(3)?, r.get::<_,String>(4)?, r.get::<_,Option<String>>(5)?, r.get::<_,Option<String>>(6)?, r.get::<_,i64>(7)?)),
+            |r| Ok((r.get::<_,String>(0)?, r.get::<_,Option<String>>(1)?, r.get::<_,Option<String>>(2)?, r.get::<_,String>(3)?, r.get::<_,Option<String>>(4)?, r.get::<_,Option<String>>(5)?, r.get::<_,String>(6)?, r.get::<_,Option<String>>(7)?, r.get::<_,Option<String>>(8)?, r.get::<_,i64>(9)?)),
         ).map_err(DbError::from)?;
         dst.execute(
-            "INSERT OR REPLACE INTO patients(patient_id,study_id,research_id,display_label,clinical_question,position,status,started_at,completed_at,elapsed_seconds) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-            params![pid, p.0, p.1, p.2, p.3, pos, p.4, p.5, p.6, p.7],
+            "INSERT OR REPLACE INTO patients(patient_id,study_id,research_id,model_id,display_label,clinical_question,cancer_type,position,status,started_at,completed_at,elapsed_seconds) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![pid, p.0, p.1, p.2, p.3, p.4, p.5, pos, p.6, p.7, p.8, p.9],
         ).map_err(DbError::from)?;
         dst.execute(
             "INSERT OR REPLACE INTO reviewer_assignments(reviewer_id,patient_id,position) VALUES (?1,?2,?3)",

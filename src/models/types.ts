@@ -105,8 +105,14 @@ export interface SourceDocument {
 export interface Patient {
   id: string;
   researchId: string | null;
+  modelId: string | null;
   displayLabel: string;
   clinicalQuestion: string | null;
+  cancerType: string | null;
+  /** Phase-1 context: patient_profile, timeline, comorbidities, family history. */
+  context: PatientContext | null;
+  /** Phase-2 framing: decision_points, specialist_perspectives. */
+  framing: PatientFraming | null;
   position: number;
   status: PatientState;
   startedAt: string | null;
@@ -118,9 +124,30 @@ export interface Patient {
   noteBlocks: NoteBlock[];
 }
 
+export interface TimelineEvent {
+  date?: string;
+  event_type?: string;
+  finding?: string;
+  source_quote?: string;
+}
+
+export interface PatientContext {
+  patient_profile?: string;
+  timeline?: TimelineEvent[];
+  comorbidities?: Array<Record<string, unknown>>;
+  family_history?: Record<string, unknown>;
+}
+
+export interface PatientFraming {
+  decision_points?: string[];
+  relevant_patient_factors?: string;
+  specialist_perspectives?: Record<string, string>;
+}
+
 export interface PatientSummary {
   id: string;
   researchId: string | null;
+  modelId: string | null;
   displayLabel: string;
   position: number;
   status: PatientState;

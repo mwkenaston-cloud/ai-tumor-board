@@ -20,9 +20,13 @@ const settings: StudySettings = {
 const patientA: Patient = {
   id: "PT-1",
   researchId: "TUM-0042",
+  modelId: "demo-model-v1",
   displayLabel: "Stage III colon adenocarcinoma",
   clinicalQuestion:
     "72yo with resected stage III colon adenocarcinoma (pT3N1). What adjuvant systemic therapy is most appropriate?",
+  cancerType: "Stage III colon adenocarcinoma",
+  context: null,
+  framing: null,
   position: 0,
   status: "not_started",
   startedAt: null,
@@ -111,9 +115,13 @@ const patientA: Patient = {
 const patientB: Patient = {
   id: "PT-2",
   researchId: "TUM-0043",
+  modelId: "demo-model-v1",
   displayLabel: "EGFR+ lung adenocarcinoma",
   clinicalQuestion:
     "64yo never-smoker with metastatic EGFR exon 19 del lung adenocarcinoma. First-line systemic therapy?",
+  cancerType: "EGFR+ lung adenocarcinoma",
+  context: null,
+  framing: null,
   position: 1,
   status: "not_started",
   startedAt: null,
@@ -181,8 +189,8 @@ export function seedAssignment(): Assignment {
     reviewerDisplayName: "Reviewer 04",
     state: "ready",
     patients: [
-      { id: "PT-1", researchId: "TUM-0042", displayLabel: patientA.displayLabel, position: 0, status: "not_started", elapsedSeconds: 0 },
-      { id: "PT-2", researchId: "TUM-0043", displayLabel: patientB.displayLabel, position: 1, status: "not_started", elapsedSeconds: 0 },
+      { id: "PT-1", researchId: "TUM-0042", modelId: "demo-model-v1", displayLabel: patientA.displayLabel, position: 0, status: "not_started", elapsedSeconds: 0 },
+      { id: "PT-2", researchId: "TUM-0043", modelId: "demo-model-v1", displayLabel: patientB.displayLabel, position: 1, status: "not_started", elapsedSeconds: 0 },
     ],
   };
 }

@@ -10,6 +10,9 @@ import {
 
 export default function CoordinatorScreen() {
   const { actions } = useApp();
+  const [unlocked, setUnlocked] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pwErr, setPwErr] = useState(false);
   const [summary, setSummary] = useState<CoordinatorSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -23,6 +26,7 @@ export default function CoordinatorScreen() {
   };
 
   useEffect(() => {
+    if (!unlocked) return;
     if (!isTauri()) {
       setError("Coordinator mode requires the desktop app (npm run tauri dev).");
       return;
@@ -34,7 +38,42 @@ export default function CoordinatorScreen() {
         console.error(e);
         setError("Could not open the coordinator workspace. A study credential may be required.");
       });
-  }, []);
+  }, [unlocked]);
+
+  // Client-side coordinator password gate (parity with the prototype's editor lock).
+  const tryUnlock = () => {
+    if (pw === "edit") {
+      setPwErr(false);
+      setUnlocked(true);
+    } else {
+      setPwErr(true);
+    }
+  };
+
+  if (!unlocked) {
+    return (
+      <div className="center-screen">
+        <div className="card" style={{ maxWidth: 400 }}>
+          <div style={{ fontSize: 32, textAlign: "center" }}>🗂️</div>
+          <h2 style={{ textAlign: "center" }}>Coordinator access</h2>
+          <p style={{ textAlign: "center" }}>Enter the coordinator password to continue.</p>
+          <input
+            className="text-input"
+            type="password"
+            autoFocus
+            value={pw}
+            onChange={(e) => { setPw(e.currentTarget.value); setPwErr(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") tryUnlock(); }}
+          />
+          {pwErr && <div className="form-error">Incorrect password.</div>}
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button className="btn btn-ghost" style={{ flex: 1, justifyContent: "center" }} onClick={actions.goHome}>← Home</button>
+            <button className="btn btn-primary" style={{ flex: 1, justifyContent: "center" }} onClick={tryUnlock}>Unlock</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -95,6 +134,11 @@ export default function CoordinatorScreen() {
                   patient={p}
                   active={p.id === selected}
                   onSelect={() => setSelected(p.id === selected ? null : p.id)}
+                  onRemove={async () => {
+                    await coordinatorIpc.removePatient(p.id);
+                    if (selected === p.id) setSelected(null);
+                    refresh();
+                  }}
                 />
               ))}
               {summary.patients.length === 0 && (
@@ -127,16 +171,15 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 function AddPatientForm({ onAdded }: { onAdded: () => void }) {
   const [researchId, setResearchId] = useState("");
-  const [label, setLabel] = useState("");
-  const [question, setQuestion] = useState("");
+  const [modelId, setModelId] = useState("");
   const [busy, setBusy] = useState(false);
 
   const add = async () => {
-    if (!label.trim()) return;
+    if (!researchId.trim() || !modelId.trim()) return;
     setBusy(true);
     try {
-      await coordinatorIpc.addPatient(researchId, label, question);
-      setResearchId(""); setLabel(""); setQuestion("");
+      await coordinatorIpc.addPatient(researchId, modelId);
+      setResearchId(""); setModelId("");
       onAdded();
     } catch (e) {
       console.error(e);
@@ -149,17 +192,19 @@ function AddPatientForm({ onAdded }: { onAdded: () => void }) {
     <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <input className="text-input" placeholder="Research ID" value={researchId} onChange={(e) => setResearchId(e.currentTarget.value)} />
-        <input className="text-input" placeholder="Display label" value={label} onChange={(e) => setLabel(e.currentTarget.value)} />
+        <input className="text-input" placeholder="Model ID" value={modelId} onChange={(e) => setModelId(e.currentTarget.value)} />
       </div>
-      <textarea className="text-input" style={{ marginTop: 8, minHeight: 52, resize: "vertical" }} placeholder="Clinical question" value={question} onChange={(e) => setQuestion(e.currentTarget.value)} />
-      <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={busy || !label.trim()} onClick={add}>
+      <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 6 }}>
+        Clinical question and patient context are filled in from the imported AI output.
+      </div>
+      <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} disabled={busy || !researchId.trim() || !modelId.trim()} onClick={add}>
         + Add patient
       </button>
     </div>
   );
 }
 
-function PatientRow({ patient, active, onSelect }: { patient: CoordPatient; active: boolean; onSelect: () => void }) {
+function PatientRow({ patient, active, onSelect, onRemove }: { patient: CoordPatient; active: boolean; onSelect: () => void; onRemove: () => void }) {
   return (
     <div
       className="queue-row"
@@ -167,10 +212,22 @@ function PatientRow({ patient, active, onSelect }: { patient: CoordPatient; acti
       onClick={onSelect}
     >
       <span className="q-id">{patient.researchId ?? patient.id}</span>
-      <span className="q-label">{patient.displayLabel}</span>
+      <span className="q-label">
+        {patient.cancerType ?? patient.modelId ?? "—"}
+        {patient.modelId && patient.cancerType && (
+          <span style={{ fontSize: 10.5, color: "var(--muted-2)", marginLeft: 6 }}>({patient.modelId})</span>
+        )}
+      </span>
       <span style={{ fontSize: 10.5, color: "var(--muted)" }}>
         {patient.documentCount} doc{patient.documentCount === 1 ? "" : "s"} · {patient.recommendationCount} rec
       </span>
+      <button
+        className="nb-remove-btn"
+        title="Remove patient"
+        onClick={(e) => { e.stopPropagation(); if (confirm(`Remove patient ${patient.researchId ?? patient.id}?`)) onRemove(); }}
+      >
+        ✕
+      </button>
     </div>
   );
 }
@@ -209,7 +266,9 @@ function PatientDetail({ patient, onChanged }: { patient: CoordPatient; onChange
 
   return (
     <div style={{ marginTop: 12, background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
-      <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: 8 }}>{patient.displayLabel}</div>
+      <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: 8 }}>
+        {patient.researchId ?? patient.id} · {patient.cancerType ?? patient.modelId ?? "—"}
+      </div>
 
       <div className="field-label">Add source document</div>
       <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
@@ -283,7 +342,7 @@ function BuildPackagePanel({ summary, onBuilt }: { summary: CoordinatorSummary; 
         {summary.patients.map((p) => (
           <label key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, cursor: "pointer" }}>
             <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)} />
-            {p.displayLabel}
+            {p.researchId ?? p.id} · {p.cancerType ?? p.modelId ?? "—"}
             {(p.documentCount === 0 || p.recommendationCount === 0) && (
               <span style={{ color: "var(--warning)", fontSize: 10.5 }}>
                 (needs {p.documentCount === 0 ? "a document" : ""}{p.documentCount === 0 && p.recommendationCount === 0 ? " + " : ""}{p.recommendationCount === 0 ? "AI output" : ""})
