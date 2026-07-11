@@ -53,6 +53,7 @@ interface AppState {
   currentPatientId: string | null;
   saveState: SaveState;
   surveyData: SurveyData;
+  reviewSeconds: number;
 }
 
 interface AppActions {
@@ -96,8 +97,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     perPatient: {},
     general: {},
   });
+  const [reviewSeconds, setReviewSeconds] = useState(0);
 
   const saveTimer = useRef<number | null>(null);
+  const clockRef = useRef<number | null>(null);
+
+  // Live review timer: ticks only while a patient is open on the review screen.
+  useEffect(() => {
+    if (screen !== "review") {
+      if (clockRef.current) window.clearInterval(clockRef.current);
+      return;
+    }
+    clockRef.current = window.setInterval(() => setReviewSeconds((s) => s + 1), 1000);
+    return () => {
+      if (clockRef.current) window.clearInterval(clockRef.current);
+    };
+  }, [screen]);
 
   // Always-current view of patients for use inside stable callbacks/persistence
   // (which would otherwise close over a stale snapshot).
@@ -242,6 +257,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               p.noteBlocks.length > 0 ? p : { ...p, noteBlocks: reindex([userBlock("")]) };
             setPatients((prev) => ({ ...prev, [patientId]: patient }));
             setCurrentPatientId(patientId);
+            setReviewSeconds(patient.elapsedSeconds);
             setScreen("review");
             setPatientStatus(patientId, patient.status as PatientState);
           })
@@ -249,6 +265,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       setCurrentPatientId(patientId);
+      setReviewSeconds(patientsRef.current[patientId]?.elapsedSeconds ?? 0);
       setScreen("review");
       updatePatient(patientId, (p) => {
         if (p.status === "complete") {
@@ -381,9 +398,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }));
       setPatientStatus(patientId, "complete");
       if (isTauri()) {
-        const elapsed = patientsRef.current[patientId]?.elapsedSeconds ?? 0;
         ipc
-          .completePatient(patientId, elapsed)
+          .completePatient(patientId, reviewSeconds)
           .then(() => ipc.loadAssignment())
           .then((a) => setAssignment(a))
           .catch((e) => console.error("complete_patient failed", e));
@@ -395,7 +411,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         backToLobby();
       }
     },
-    [updatePatient, setPatientStatus, backToLobby, assignment]
+    [updatePatient, setPatientStatus, backToLobby, assignment, reviewSeconds]
   );
 
   const submitPatientSurvey = useCallback(
@@ -485,6 +501,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currentPatientId,
     saveState,
     surveyData,
+    reviewSeconds,
     actions,
     currentPatient,
   };
