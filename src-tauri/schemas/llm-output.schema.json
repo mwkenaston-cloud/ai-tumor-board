@@ -10,10 +10,16 @@
       "properties": {
         "model": { "type": "string", "minLength": 1 },
         "prompt_version": { "type": "string", "minLength": 1 },
+        "timestamp": { "type": ["string", "null"] },
         "cancer_type": { "type": ["string", "null"] },
         "clinical_question": { "type": ["string", "null"] }
       }
     },
+    "phase1_patient_summary": { "type": ["object", "null"] },
+    "patient_comorbidities": { "type": ["array", "null"] },
+    "patient_family_history": { "type": ["object", "null"] },
+    "phase2_question_framing": { "type": ["object", "null"] },
+    "phase3_temperature_level_selection": { "type": ["object", "null"] },
     "phase3_recommendations": {
       "type": "array",
       "minItems": 1,
@@ -21,51 +27,55 @@
         "type": "object",
         "required": ["recommendation_id", "recommendation_text"],
         "properties": {
-          "recommendation_id": { "type": "string", "minLength": 1 },
+          "recommendation_id": { "type": ["string", "integer"] },
           "recommendation_text": { "type": "string", "minLength": 1 },
           "temperature_level": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 },
           "temperature_label": { "type": ["string", "null"] },
+          "clinical_rationale": { "type": ["string", "null"] },
           "evidence_tier": { "type": ["string", "null"] },
           "risk_score": { "type": ["number", "null"], "minimum": 0, "maximum": 5 },
-          "clinical_rationale": { "type": ["string", "null"] }
+          "safety_score_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "contraindications_noted": { "type": ["array", "null"] },
+          "monitoring_requirements": { "type": ["array", "null"] }
         }
       }
     },
     "phase4_safety_assessment": {
-      "type": "array",
+      "type": ["array", "null"],
       "items": {
         "type": "object",
         "required": ["recommendation_id"],
         "properties": {
-          "recommendation_id": { "type": "string" },
-          "safety_score_final_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
-          "safety_score_rationale": { "type": ["string", "null"] },
+          "recommendation_id": { "type": ["string", "integer"] },
           "drug_interactions": { "type": ["array", "null"] },
+          "contraindication_classification": { "type": ["object", "null"] },
           "adverse_event_profile": { "type": ["array", "null"] },
-          "monitoring_plan": { "type": ["string", "null"] }
+          "monitoring_plan": { "type": ["string", "null"] },
+          "safety_score_final_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "safety_score_rationale": { "type": ["string", "null"] }
         }
       }
     },
     "phase5_condensed_recommendations": {
-      "type": "array",
+      "type": ["array", "null"],
       "items": {
         "type": "object",
         "required": ["recommendation_id"],
         "properties": {
-          "recommendation_id": { "type": "string" },
+          "recommendation_id": { "type": ["string", "integer"] },
           "condensed_note": { "type": ["string", "null"] }
         }
       }
     },
     "phase6_synthesis": {
-      "type": "object",
+      "type": ["object", "null"],
       "properties": {
         "priority_ranking": {
-          "type": "array",
+          "type": ["array", "null"],
           "items": {
             "type": "object",
             "properties": {
-              "recommendation_id": { "type": "string" },
+              "recommendation_id": { "type": ["string", "integer"] },
               "rank": { "type": ["integer", "null"], "minimum": 1 },
               "rationale": { "type": ["string", "null"] }
             }
