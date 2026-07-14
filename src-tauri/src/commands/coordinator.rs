@@ -118,7 +118,7 @@ pub fn coordinator_open_workspace(
         .to_string();
         c.execute(
             "INSERT OR REPLACE INTO studies(study_id, title, protocol_version, schema_version, settings_json, created_at)
-             VALUES ('STUDY-1', 'New Study', 'v1', 1, ?1, ?2)",
+             VALUES ('STUDY-1', 'AI Tumor Board', 'v1', 1, ?1, ?2)",
             params![default_settings, now_iso()],
         )
         .map_err(|e| map_err(e))?;
@@ -301,7 +301,7 @@ pub fn coordinator_build_package(
             .map_err(map_err)?
             .ok_or("workspace missing coordinator key")?;
         let pubkey = hex32(&pub_hex).ok_or("bad coordinator key")?;
-        packaging::build_package(
+        let receipt = packaging::build_package(
             &s.conn,
             std::path::Path::new(&destination),
             &password,
@@ -309,8 +309,28 @@ pub fn coordinator_build_package(
             &patient_ids,
             &pubkey,
         )
-        .map_err(map_err)
+        .map_err(map_err)?;
+
+        // Record this batch so the Responses tab can show what was sent and who
+        // has responded. A reviewer may receive multiple batches over time.
+        ensure_sent_table(&s.conn).map_err(map_err)?;
+        s.conn
+            .execute(
+                "INSERT OR REPLACE INTO sent_assignments(assignment_id, reviewer_id, display_name, patient_count, sha256, created_at)
+                 VALUES (?1,?2,?3,?4,?5,?6)",
+                params![receipt.assignment_id, reviewer_id, display_name, receipt.patient_count as i64, receipt.sha256, now_iso()],
+            )
+            .map_err(map_err)?;
+        Ok(receipt)
     })
+}
+
+fn ensure_sent_table(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS sent_assignments (
+             assignment_id TEXT PRIMARY KEY, reviewer_id TEXT NOT NULL, display_name TEXT,
+             patient_count INTEGER NOT NULL, sha256 TEXT, created_at TEXT NOT NULL);",
+    )
 }
 
 #[derive(Serialize)]
@@ -390,12 +410,223 @@ pub fn coordinator_list_results(state: State<CoordinatorState>) -> Result<Vec<Re
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Batch {
+    pub assignment_id: String,
+    pub reviewer_id: String,
+    pub display_name: Option<String>,
+    pub patient_count: i64,
+    pub created_at: String,
+    pub responded: bool,
+    pub submitted_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AggRec {
+    pub recommendation_id: String,
+    pub title: String,
+    pub accepted: usize,
+    pub dismissed: usize,
+    pub ignored: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AggPatient {
+    pub patient_id: String,
+    pub research_id: Option<String>,
+    pub model_id: Option<String>,
+    pub response_count: usize,
+    pub avg_pct_physician_authored: f64,
+    pub recommendations: Vec<AggRec>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponsesView {
+    pub batches: Vec<Batch>,
+    pub response_count: usize,
+    pub reviewers: Vec<String>,
+    pub patients: Vec<AggPatient>,
+}
+
+/// Batches sent + who has responded + aggregated findings across all imported
+/// physician responses.
+#[tauri::command]
+pub fn coordinator_responses(state: State<CoordinatorState>) -> Result<ResponsesView, String> {
+    with_session(&state, |s| build_responses_view(&s.conn).map_err(map_err))
+}
+
+fn table_exists(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+        [name],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n > 0)
+    .unwrap_or(false)
+}
+
+fn build_responses_view(conn: &Connection) -> Result<ResponsesView, rusqlite::Error> {
+    // Sent batches, with responded status joined from imported_responses.
+    let mut batches = Vec::new();
+    if table_exists(conn, "sent_assignments") {
+        let has_imported = table_exists(conn, "imported_responses");
+        let sql = if has_imported {
+            "SELECT sa.assignment_id, sa.reviewer_id, sa.display_name, sa.patient_count, sa.created_at,
+                    ir.submitted_at
+             FROM sent_assignments sa
+             LEFT JOIN imported_responses ir
+               ON ir.assignment_id = sa.assignment_id AND ir.reviewer_id = sa.reviewer_id
+             ORDER BY sa.created_at DESC"
+        } else {
+            "SELECT assignment_id, reviewer_id, display_name, patient_count, created_at, NULL
+             FROM sent_assignments ORDER BY created_at DESC"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        batches = stmt
+            .query_map([], |r| {
+                let submitted_at: Option<String> = r.get(5)?;
+                Ok(Batch {
+                    assignment_id: r.get(0)?,
+                    reviewer_id: r.get(1)?,
+                    display_name: r.get(2)?,
+                    patient_count: r.get(3)?,
+                    created_at: r.get(4)?,
+                    responded: submitted_at.is_some(),
+                    submitted_at,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+
+    // Parse all imported response payloads.
+    let mut payloads: Vec<serde_json::Value> = Vec::new();
+    if table_exists(conn, "response_payloads") {
+        let mut stmt = conn.prepare("SELECT payload_json FROM response_payloads")?;
+        payloads = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .filter_map(|row| row.ok())
+            .filter_map(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
+            .collect();
+    }
+
+    let mut reviewers: Vec<String> = payloads
+        .iter()
+        .filter_map(|p| p.get("header").and_then(|h| h.get("reviewerId")).and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    reviewers.sort();
+    reviewers.dedup();
+
+    let patients = aggregate_patients(conn, &payloads)?;
+
+    Ok(ResponsesView {
+        batches,
+        response_count: payloads.len(),
+        reviewers,
+        patients,
+    })
+}
+
+fn aggregate_patients(
+    conn: &Connection,
+    payloads: &[serde_json::Value],
+) -> Result<Vec<AggPatient>, rusqlite::Error> {
+    use std::collections::BTreeMap;
+
+    // For each patient, collect each reviewer's per-rec decision map + attribution.
+    struct PerReviewer {
+        statuses: BTreeMap<String, String>,
+        pct: f64,
+    }
+    let mut by_patient: BTreeMap<String, Vec<PerReviewer>> = BTreeMap::new();
+
+    for p in payloads {
+        let Some(patients) = p.get("patients").and_then(|v| v.as_array()) else { continue };
+        for entry in patients {
+            let Some(pid) = entry.get("patientId").and_then(|v| v.as_str()) else { continue };
+            let mut statuses = BTreeMap::new();
+            if let Some(decisions) = entry.get("decisions").and_then(|v| v.as_array()) {
+                for d in decisions {
+                    if let (Some(rid), Some(st)) = (
+                        d.get("recommendationId").and_then(|v| v.as_str()),
+                        d.get("status").and_then(|v| v.as_str()),
+                    ) {
+                        statuses.insert(rid.to_string(), st.to_string());
+                    }
+                }
+            }
+            let pct = entry
+                .get("attribution")
+                .and_then(|a| a.get("pctPhysicianOriginal"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            by_patient.entry(pid.to_string()).or_default().push(PerReviewer { statuses, pct });
+        }
+    }
+
+    let mut out = Vec::new();
+    for (pid, reviews) in by_patient {
+        if reviews.is_empty() {
+            continue;
+        }
+        // Patient identity + recommendation set from the workspace.
+        let (research_id, model_id): (Option<String>, Option<String>) = conn
+            .query_row("SELECT research_id, model_id FROM patients WHERE patient_id = ?1", [&pid], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap_or((None, None));
+
+        let mut rec_stmt =
+            conn.prepare("SELECT recommendation_id, COALESCE(title, recommendation_id) FROM recommendations WHERE patient_id = ?1 ORDER BY position")?;
+        let recs: Vec<(String, String)> = rec_stmt
+            .query_map([&pid], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let n = reviews.len();
+        let recommendations = recs
+            .into_iter()
+            .map(|(rid, title)| {
+                let mut accepted = 0;
+                let mut dismissed = 0;
+                for rv in &reviews {
+                    match rv.statuses.get(&rid).map(String::as_str) {
+                        Some("used") | Some("used-and-edited") => accepted += 1,
+                        Some("dismissed") => dismissed += 1,
+                        _ => {}
+                    }
+                }
+                AggRec {
+                    recommendation_id: rid,
+                    title,
+                    accepted,
+                    dismissed,
+                    ignored: n - accepted - dismissed,
+                }
+            })
+            .collect();
+
+        let avg_pct = reviews.iter().map(|r| r.pct).sum::<f64>() / n as f64;
+        out.push(AggPatient {
+            patient_id: pid,
+            research_id,
+            model_id,
+            response_count: n,
+            avg_pct_physician_authored: (avg_pct * 10.0).round() / 10.0,
+            recommendations,
+        });
+    }
+    Ok(out)
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 fn build_summary(conn: &Connection, provisioned: bool) -> Result<CoordinatorSummary, rusqlite::Error> {
     let study_title: String = conn
         .query_row("SELECT title FROM studies LIMIT 1", [], |r| r.get(0))
-        .unwrap_or_else(|_| "New Study".to_string());
+        .unwrap_or_else(|_| "AI Tumor Board".to_string());
 
     let mut ps = conn.prepare(
         "SELECT p.patient_id, p.research_id, p.model_id, p.cancer_type, p.clinical_question,
@@ -474,4 +705,55 @@ fn hex32(s: &str) -> Option<[u8; 32]> {
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
         .collect();
     bytes?.try_into().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::container::{self, ContainerRole};
+
+    fn tmp() -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        p.push(format!("atb-agg-{nanos}"));
+        std::fs::create_dir_all(&p).unwrap();
+        p.join("ws.atb")
+    }
+
+    #[test]
+    fn aggregates_decisions_across_reviewers() {
+        let conn = container::create(&tmp(), "pw", ContainerRole::Coordinator).unwrap();
+        conn.execute("INSERT INTO studies(study_id,title,protocol_version,schema_version,created_at) VALUES ('STUDY-1','AI Tumor Board','v1',1,'t')", []).unwrap();
+        conn.execute("INSERT INTO patients(patient_id,study_id,research_id,model_id,display_label,position,status,elapsed_seconds) VALUES ('PT-1','STUDY-1','R1','m','L',0,'not_started',0)", []).unwrap();
+        conn.execute("INSERT INTO recommendations(recommendation_id,patient_id,position,title,recommendation_text,is_custom) VALUES ('PT-1:1','PT-1',0,'Rec 1','t',0)", []).unwrap();
+        conn.execute("INSERT INTO recommendations(recommendation_id,patient_id,position,title,recommendation_text,is_custom) VALUES ('PT-1:2','PT-1',1,'Rec 2','t',0)", []).unwrap();
+
+        let payload = |reviewer: &str, s1: &str, s2: &str, pct: f64| {
+            serde_json::json!({
+                "header": {"reviewerId": reviewer},
+                "patients": [{
+                    "patientId": "PT-1",
+                    "attribution": {"pctPhysicianOriginal": pct},
+                    "decisions": [
+                        {"recommendationId":"PT-1:1","status":s1},
+                        {"recommendationId":"PT-1:2","status":s2}
+                    ]
+                }]
+            })
+        };
+        // REV-A: rec1 used, rec2 dismissed. REV-B: rec1 used-and-edited, rec2 pending (ignored).
+        let payloads = vec![
+            payload("REV-A", "used", "dismissed", 40.0),
+            payload("REV-B", "used-and-edited", "pending", 60.0),
+        ];
+        let agg = aggregate_patients(&conn, &payloads).unwrap();
+        assert_eq!(agg.len(), 1);
+        let p = &agg[0];
+        assert_eq!(p.response_count, 2);
+        assert_eq!(p.avg_pct_physician_authored, 50.0);
+        let r1 = p.recommendations.iter().find(|r| r.recommendation_id == "PT-1:1").unwrap();
+        assert_eq!((r1.accepted, r1.dismissed, r1.ignored), (2, 0, 0));
+        let r2 = p.recommendations.iter().find(|r| r.recommendation_id == "PT-1:2").unwrap();
+        assert_eq!((r2.accepted, r2.dismissed, r2.ignored), (0, 1, 1));
+    }
 }

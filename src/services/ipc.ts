@@ -96,6 +96,37 @@ export interface ResultRow {
   importedAt: string;
 }
 
+export interface Batch {
+  assignmentId: string;
+  reviewerId: string;
+  displayName: string | null;
+  patientCount: number;
+  createdAt: string;
+  responded: boolean;
+  submittedAt: string | null;
+}
+export interface AggRec {
+  recommendationId: string;
+  title: string;
+  accepted: number;
+  dismissed: number;
+  ignored: number;
+}
+export interface AggPatient {
+  patientId: string;
+  researchId: string | null;
+  modelId: string | null;
+  responseCount: number;
+  avgPctPhysicianAuthored: number;
+  recommendations: AggRec[];
+}
+export interface ResponsesView {
+  batches: Batch[];
+  responseCount: number;
+  reviewers: string[];
+  patients: AggPatient[];
+}
+
 export const coordinatorIpc = {
   openWorkspace: () => invoke<CoordinatorSummary>("coordinator_open_workspace"),
   summary: () => invoke<CoordinatorSummary>("coordinator_summary"),
@@ -126,4 +157,5 @@ export const coordinatorIpc = {
   importResponse: (atbrPath: string) =>
     invoke<ImportSummary>("coordinator_import_response", { atbrPath }),
   listResults: () => invoke<ResultRow[]>("coordinator_list_results"),
+  responses: () => invoke<ResponsesView>("coordinator_responses"),
 };

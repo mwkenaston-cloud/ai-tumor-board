@@ -51,6 +51,7 @@ pub fn run() {
             coordinator::coordinator_build_package,
             coordinator::coordinator_import_response,
             coordinator::coordinator_list_results,
+            coordinator::coordinator_responses,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

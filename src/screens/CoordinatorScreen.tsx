@@ -6,6 +6,9 @@ import {
   isTauri,
   type CoordinatorSummary,
   type CoordPatient,
+  type ResponsesView,
+  type Batch,
+  type AggPatient,
 } from "../services/ipc";
 
 export default function CoordinatorScreen() {
@@ -16,6 +19,7 @@ export default function CoordinatorScreen() {
   const [summary, setSummary] = useState<CoordinatorSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState<"build" | "responses">("build");
 
   const refresh = async () => {
     try {
@@ -101,61 +105,54 @@ export default function CoordinatorScreen() {
   return (
     <div className="lobby">
       <div style={{ maxWidth: 1120, margin: "0 auto", width: "96%", padding: "28px 0" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-          <h2 style={{ margin: 0, color: "#1e293b" }}>{summary.studyTitle}</h2>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0, color: "#1e293b" }}>{summary.studyTitle}</h2>
+            <button className={`btn btn-sm ${tab === "build" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("build")}>
+              Build &amp; assign
+            </button>
+            <button className={`btn btn-sm ${tab === "responses" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("responses")}>
+              Responses &amp; results
+            </button>
+          </div>
           <button className="btn btn-ghost btn-sm" onClick={actions.goHome}>← Home</button>
         </div>
-        {!summary.provisioned && (
-          <div
-            style={{
-              background: "#fffbeb",
-              border: "1px solid #fde68a",
-              color: "#92400e",
-              borderRadius: 8,
-              padding: "8px 12px",
-              fontSize: 12,
-              marginBottom: 16,
-            }}
-          >
-            Development build — no study authority credential is provisioned, so coordinator actions
-            are unrestricted. Production builds require a signed coordinator credential.
-          </div>
-        )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24, alignItems: "start" }}>
-          {/* Left: patients */}
-          <div>
-            <SectionTitle>Patients ({summary.patients.length})</SectionTitle>
-            <AddPatientForm onAdded={refresh} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-              {summary.patients.map((p) => (
-                <PatientRow
-                  key={p.id}
-                  patient={p}
-                  active={p.id === selected}
-                  onSelect={() => setSelected(p.id === selected ? null : p.id)}
-                  onRemove={async () => {
-                    await coordinatorIpc.removePatient(p.id);
-                    if (selected === p.id) setSelected(null);
-                    refresh();
-                  }}
-                />
-              ))}
-              {summary.patients.length === 0 && (
-                <div style={{ fontSize: 12, color: "var(--muted-2)" }}>No patients yet.</div>
-              )}
+        {tab === "build" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24, alignItems: "start" }}>
+            {/* Left: patients */}
+            <div>
+              <SectionTitle>Patients ({summary.patients.length})</SectionTitle>
+              <AddPatientForm onAdded={refresh} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                {summary.patients.map((p) => (
+                  <PatientRow
+                    key={p.id}
+                    patient={p}
+                    active={p.id === selected}
+                    onSelect={() => setSelected(p.id === selected ? null : p.id)}
+                    onRemove={async () => {
+                      await coordinatorIpc.removePatient(p.id);
+                      if (selected === p.id) setSelected(null);
+                      refresh();
+                    }}
+                  />
+                ))}
+                {summary.patients.length === 0 && (
+                  <div style={{ fontSize: 12, color: "var(--muted-2)" }}>No patients yet.</div>
+                )}
+              </div>
+              {selectedPatient && <PatientDetail patient={selectedPatient} onChanged={refresh} />}
             </div>
-            {selectedPatient && (
-              <PatientDetail patient={selectedPatient} onChanged={refresh} />
-            )}
-          </div>
 
-          {/* Right: build + import + results */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-            <BuildPackagePanel summary={summary} onBuilt={refresh} />
-            <ImportResponsePanel onImported={refresh} resultsCount={summary.resultsCount} />
+            {/* Right: build packages (batches) */}
+            <div>
+              <BuildPackagePanel summary={summary} onBuilt={refresh} />
+            </div>
           </div>
-        </div>
+        ) : (
+          <ResponsesTab />
+        )}
       </div>
     </div>
   );
@@ -331,6 +328,10 @@ function BuildPackagePanel({ summary, onBuilt }: { summary: CoordinatorSummary; 
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
       <SectionTitle>Build assignment package</SectionTitle>
+      <div style={{ fontSize: 11, color: "var(--muted-2)", marginBottom: 10 }}>
+        Each build is a batch. Build multiple packages — for different physicians, or additional
+        batches for the same physician — and track responses on the Responses tab.
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <input className="text-input" placeholder="Reviewer ID" value={reviewerId} onChange={(e) => setReviewerId(e.currentTarget.value)} />
         <input className="text-input" placeholder="Reviewer name" value={displayName} onChange={(e) => setDisplayName(e.currentTarget.value)} />
@@ -397,6 +398,124 @@ function ImportResponsePanel({ onImported, resultsCount }: { onImported: () => v
       <button className="btn btn-primary btn-sm" onClick={importFile}>Import response file…</button>
       {msg && <div style={{ color: "var(--success)", fontSize: 12, marginTop: 8 }}>{msg}</div>}
       {err && <div className="form-error">{err}</div>}
+    </div>
+  );
+}
+
+function ResponsesTab() {
+  const [view, setView] = useState<ResponsesView | null>(null);
+  const load = async () => {
+    try {
+      setView(await coordinatorIpc.responses());
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 24, alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <ImportResponsePanel onImported={load} resultsCount={view?.responseCount ?? 0} />
+        <BatchesPanel batches={view?.batches ?? []} />
+      </div>
+      <AggregatePanel view={view} />
+    </div>
+  );
+}
+
+function BatchesPanel({ batches }: { batches: Batch[] }) {
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
+      <SectionTitle>Sent batches ({batches.length})</SectionTitle>
+      {batches.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--muted-2)" }}>No assignment packages have been built yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {batches.map((b) => (
+            <div key={b.assignmentId} style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--border-2)", paddingBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+                  {b.displayName ?? b.reviewerId}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {b.reviewerId} · {b.patientCount} patient{b.patientCount === 1 ? "" : "s"} · {b.createdAt.slice(0, 10)}
+                </div>
+              </div>
+              <span className={`status-chip ${b.responded ? "complete" : "not_started"}`}>
+                {b.responded ? "Responded" : "Awaiting"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Bar({ accepted, dismissed, ignored }: { accepted: number; dismissed: number; ignored: number }) {
+  const total = Math.max(1, accepted + dismissed + ignored);
+  const seg = (n: number, color: string) =>
+    n > 0 ? <div style={{ width: `${(n / total) * 100}%`, background: color }} title={`${n}`} /> : null;
+  return (
+    <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", background: "var(--border-2)" }}>
+      {seg(accepted, "#16a34a")}
+      {seg(dismissed, "#dc2626")}
+      {seg(ignored, "#cbd5e1")}
+    </div>
+  );
+}
+
+function AggregatePanel({ view }: { view: ResponsesView | null }) {
+  if (!view) return <div className="doc-empty">Loading…</div>;
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 16 }}>
+      <SectionTitle>Aggregated findings</SectionTitle>
+      <div style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 6 }}>
+        <strong>{view.responseCount}</strong> response{view.responseCount === 1 ? "" : "s"} from{" "}
+        <strong>{view.reviewers.length}</strong> physician{view.reviewers.length === 1 ? "" : "s"}
+        {view.reviewers.length > 0 && (
+          <span style={{ color: "var(--muted)" }}> ({view.reviewers.join(", ")})</span>
+        )}
+        .
+      </div>
+      <div style={{ fontSize: 10.5, color: "var(--muted-2)", marginBottom: 14 }}>
+        <span style={{ color: "#16a34a" }}>■ accepted</span>{"  "}
+        <span style={{ color: "#dc2626" }}>■ dismissed</span>{"  "}
+        <span style={{ color: "#94a3b8" }}>■ not used</span>
+      </div>
+
+      {view.patients.length === 0 ? (
+        <div className="doc-empty">No responses imported yet. Import a physician’s .atbr to aggregate.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {view.patients.map((p: AggPatient) => (
+            <div key={p.patientId}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <strong style={{ fontSize: 13, color: "#1e293b" }}>{p.researchId ?? p.patientId}</strong>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {p.responseCount} response{p.responseCount === 1 ? "" : "s"} · avg {p.avgPctPhysicianAuthored}% physician-authored
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {p.recommendations.map((r) => (
+                  <div key={r.recommendationId}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--text-2)", marginBottom: 3 }}>
+                      <span>{r.title}</span>
+                      <span style={{ color: "var(--muted)" }}>
+                        {r.accepted}✓ · {r.dismissed}✕ · {r.ignored}○
+                      </span>
+                    </div>
+                    <Bar accepted={r.accepted} dismissed={r.dismissed} ignored={r.ignored} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

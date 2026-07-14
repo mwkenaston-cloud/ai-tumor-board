@@ -5,7 +5,7 @@
 import type { Assignment, Patient, StudySettings } from "../models/types";
 
 const settings: StudySettings = {
-  studyTitle: "AI Tumor Board Concordance Study",
+  studyTitle: "AI Tumor Board",
   showPriority: true,
   showEvidence: true,
   showSafety: true,

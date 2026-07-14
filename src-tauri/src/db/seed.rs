@@ -27,7 +27,7 @@ pub fn seed_demo(conn: &Connection, reviewer_id: &str) -> Result<(), DbError> {
     let now = now_iso();
 
     let settings = serde_json::json!({
-        "studyTitle": "AI Tumor Board Concordance Study",
+        "studyTitle": "AI Tumor Board",
         "showPriority": true, "showEvidence": true, "showSafety": true,
         "showTemperature": true, "showDetails": true, "allowDismiss": true,
         "showTimer": true, "perPatientSurvey": true, "generalSurvey": true
@@ -37,7 +37,7 @@ pub fn seed_demo(conn: &Connection, reviewer_id: &str) -> Result<(), DbError> {
     conn.execute(
         "INSERT OR REPLACE INTO studies(study_id, title, protocol_version, schema_version,
              contact_email, instructions, settings_json, created_at)
-         VALUES ('STUDY-1', 'AI Tumor Board Concordance Study', 'v1', 1,
+         VALUES ('STUDY-1', 'AI Tumor Board', 'v1', 1,
              'coordinator@example.org', ?1, ?2, ?3)",
         params![
             "Review each assigned patient's source documents and the AI-generated recommendations. \

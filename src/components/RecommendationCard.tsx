@@ -4,6 +4,7 @@ import type {
   RecommendationDecision,
   StudySettings,
 } from "../models/types";
+import HoverInfo from "./HoverInfo";
 
 function safetyClass(score: number | null): string {
   if (score == null) return "safety-mid";
@@ -97,9 +98,9 @@ export default function RecommendationCard({
       <div className="priority-banner">
         <span className="rec-id-label">{rec.title ?? rec.id}</span>
         {settings.showPriority && rec.priorityRank != null && (
-          <span className={`prio-badge prio-${rec.priorityRank}`} style={{ cursor: "help" }} title={priorityTip}>
+          <HoverInfo className={`prio-badge prio-${rec.priorityRank}`} title="Priority" tip={priorityTip}>
             Priority {rec.priorityRank}
-          </span>
+          </HoverInfo>
         )}
         {settings.showTemperature && rec.temperatureLevel != null && (
           <span className={`temp-label temp-${rec.temperatureLevel}`}>
@@ -110,19 +111,19 @@ export default function RecommendationCard({
 
       <div className="score-row">
         {settings.showEvidence && rec.evidenceTier && (
-          <span className={`score-badge ev-${rec.evidenceTier}`} style={{ cursor: "help" }} title={evidenceTip}>
+          <HoverInfo className={`score-badge ev-${rec.evidenceTier}`} title="Evidence tier" tip={evidenceTip}>
             Evidence {rec.evidenceTier}
-          </span>
+          </HoverInfo>
         )}
         {rec.riskScore != null && (
-          <span className={`score-badge risk-${Math.round(rec.riskScore)}`} style={{ cursor: "help" }} title={riskTip}>
+          <HoverInfo className={`score-badge risk-${Math.round(rec.riskScore)}`} title="Risk score" tip={riskTip}>
             Risk {rec.riskScore}
-          </span>
+          </HoverInfo>
         )}
         {settings.showSafety && rec.safetyScore != null && (
-          <span className={`score-badge ${safetyClass(rec.safetyScore)}`} style={{ cursor: "help" }} title={safetyTip}>
+          <HoverInfo className={`score-badge ${safetyClass(rec.safetyScore)}`} title="Safety score" tip={safetyTip}>
             Safety {rec.safetyScore}%
-          </span>
+          </HoverInfo>
         )}
       </div>
 
