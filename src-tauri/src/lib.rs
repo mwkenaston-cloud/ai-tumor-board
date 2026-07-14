@@ -30,6 +30,7 @@ pub fn run() {
             reviewer::open_dev_assignment,
             reviewer::open_assignment,
             reviewer::reset_session,
+            reviewer::reset_patient,
             reviewer::load_assignment,
             reviewer::get_patient,
             reviewer::open_patient,

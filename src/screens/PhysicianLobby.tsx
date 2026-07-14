@@ -10,34 +10,45 @@ export default function PhysicianLobby() {
   const done = assignment.patients.filter((p) => p.status === "complete").length;
   const allComplete = done === assignment.patients.length && assignment.patients.length > 0;
 
+  const resetSession = () => {
+    if (
+      window.confirm(
+        "Reset this ENTIRE session? This permanently discards ALL of your notes, decisions, surveys, and timers for every patient and starts over. This cannot be undone."
+      )
+    ) {
+      actions.resetSession();
+    }
+  };
+
+  const resetPatient = (p: PatientSummary) => {
+    if (
+      window.confirm(
+        `Reset patient ${p.researchId ?? p.id}? This discards your notes, decisions, survey, and timer for this patient only. This cannot be undone.`
+      )
+    ) {
+      actions.resetPatient(p.id);
+    }
+  };
+
   return (
     <div className="lobby">
-      <div className="lobby-inner">
+      <div className="lobby-inner" style={{ flexDirection: "column", paddingBottom: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", marginBottom: 8 }}>
+          <h2 style={{ margin: 0, color: "#1e293b" }}>{assignment.studyTitle}</h2>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={resetSession}>↺ Reset session</button>
+            <button className="btn btn-ghost btn-sm" onClick={actions.goHome}>← Home</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="lobby-inner" style={{ paddingTop: 8 }}>
         <div className="lobby-guide">
-          <h2>{assignment.studyTitle}</h2>
           <p className="instructions">{assignment.instructions}</p>
           <p style={{ marginTop: 16, fontSize: 13, color: "var(--muted)" }}>
             Assigned reviewer: <strong>{assignment.reviewerDisplayName}</strong>
             {assignment.contactEmail && <> · Questions: {assignment.contactEmail}</>}
           </p>
-
-          {assignment.state !== "submitted" && (
-            <button
-              className="btn btn-ghost btn-sm"
-              style={{ marginTop: 20 }}
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Reset this session? This permanently discards ALL of your notes, decisions, surveys, and timers for every patient and starts over. This cannot be undone."
-                  )
-                ) {
-                  actions.resetSession();
-                }
-              }}
-            >
-              ↺ Reset session
-            </button>
-          )}
         </div>
 
         <div className="lobby-queue">
@@ -53,6 +64,18 @@ export default function PhysicianLobby() {
                 <span className="q-id">{p.researchId ?? p.id}</span>
                 <span className="q-label">{p.displayLabel}</span>
                 <span className={`status-chip ${p.status}`}>{p.status.replace("_", " ")}</span>
+                {p.status !== "not_started" && (
+                  <button
+                    className="nb-remove-btn"
+                    title="Reset this patient"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      resetPatient(p);
+                    }}
+                  >
+                    ↺
+                  </button>
+                )}
               </div>
             ))}
           </div>

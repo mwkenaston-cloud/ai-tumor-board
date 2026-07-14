@@ -63,6 +63,7 @@ interface AppActions {
   unlockAssignment: (path: string, password: string) => Promise<void>;
   useDemoAssignment: () => Promise<void>;
   resetSession: () => Promise<void>;
+  resetPatient: (patientId: string) => Promise<void>;
   openPatient: (patientId: string) => void;
   backToLobby: () => void;
   setNoteBlocks: (patientId: string, blocks: NoteBlock[]) => void;
@@ -261,6 +262,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCurrentPatientId(null);
     setSurveyData({ perPatient: {}, general: {} });
     setScreen("lobby");
+  }, []);
+
+  const resetPatient = useCallback(async (patientId: string) => {
+    if (isTauri()) {
+      const a = await ipc.resetPatient(patientId);
+      setAssignment(a);
+      setPatients((prev) => {
+        const n = { ...prev };
+        delete n[patientId]; // drop cache so a re-open reloads fresh
+        return n;
+      });
+    } else {
+      setAssignment((prev) =>
+        prev
+          ? { ...prev, patients: prev.patients.map((ps) => (ps.id === patientId ? { ...ps, status: "not_started", elapsedSeconds: 0 } : ps)) }
+          : prev
+      );
+      setPatients((prev) => {
+        const p = prev[patientId];
+        if (!p) return prev;
+        return { ...prev, [patientId]: { ...p, status: "not_started", noteBlocks: [], decisions: [], startedAt: null, completedAt: null, elapsedSeconds: 0 } };
+      });
+    }
+    setSurveyData((prev) => {
+      const perPatient = { ...prev.perPatient };
+      delete perPatient[patientId];
+      return { ...prev, perPatient };
+    });
   }, []);
 
   const openPatient = useCallback(
@@ -525,6 +554,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unlockAssignment,
       useDemoAssignment,
       resetSession,
+      resetPatient,
       openPatient,
       backToLobby,
       setNoteBlocks,
@@ -546,6 +576,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       unlockAssignment,
       useDemoAssignment,
       resetSession,
+      resetPatient,
       openPatient,
       backToLobby,
       setNoteBlocks,

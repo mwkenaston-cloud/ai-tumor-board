@@ -2,6 +2,7 @@
 //! keyed SQLCipher file, so a force-kill loses at most the last un-flushed
 //! change (rollback-journal durability).
 
+use rusqlite::params;
 use tauri::{AppHandle, Manager, State};
 
 use super::{Session, SessionState};
@@ -101,6 +102,44 @@ pub fn reset_session(state: State<SessionState>) -> Result<Assignment, String> {
         .map_err(map_err)?;
         tx.execute("UPDATE reviewers SET assignment_status='ready' WHERE reviewer_id = ?1", [rid.as_str()])
             .map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        repo::load_assignment(&s.conn, &rid).map_err(map_err)
+    })
+}
+
+/// Reset a single patient's work (notes, decisions, survey, timer) back to
+/// not-started, leaving the rest of the session untouched.
+#[tauri::command]
+pub fn reset_patient(state: State<SessionState>, patient_id: String) -> Result<Assignment, String> {
+    with_session(&state, |s| {
+        let rid = s.reviewer_id.clone();
+        let tx = s.conn.transaction().map_err(map_err)?;
+        tx.execute(
+            "DELETE FROM note_blocks WHERE patient_id = ?1 AND reviewer_id = ?2",
+            params![patient_id, rid],
+        )
+        .map_err(map_err)?;
+        tx.execute(
+            "DELETE FROM recommendation_decisions WHERE reviewer_id = ?2 AND recommendation_id IN
+                (SELECT recommendation_id FROM recommendations WHERE patient_id = ?1)",
+            params![patient_id, rid],
+        )
+        .map_err(map_err)?;
+        tx.execute(
+            "DELETE FROM survey_responses WHERE patient_id = ?1 AND reviewer_id = ?2",
+            params![patient_id, rid],
+        )
+        .map_err(map_err)?;
+        tx.execute(
+            "DELETE FROM audit_events WHERE patient_id = ?1 AND reviewer_id = ?2",
+            params![patient_id, rid],
+        )
+        .map_err(map_err)?;
+        tx.execute(
+            "UPDATE patients SET status='not_started', started_at=NULL, completed_at=NULL, elapsed_seconds=0 WHERE patient_id = ?1",
+            params![patient_id],
+        )
+        .map_err(map_err)?;
         tx.commit().map_err(map_err)?;
         repo::load_assignment(&s.conn, &rid).map_err(map_err)
     })
