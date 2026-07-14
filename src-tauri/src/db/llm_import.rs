@@ -108,6 +108,25 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
         .filter_map(|item| Some((rec_id_of(item)?, str_field(item, "rationale")?)))
         .collect();
 
+    // phase6 uncertainty: epistemic (evidence) + patient-specific (risk) per rec.
+    let uncertainty: std::collections::HashMap<String, (Option<String>, Option<String>)> = instance
+        .get("phase6_synthesis")
+        .and_then(|s| s.get("uncertainty"))
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty)
+        .iter()
+        .filter_map(|item| {
+            let id = rec_id_of(item)?;
+            Some((
+                id,
+                (
+                    str_field(item, "epistemic_uncertainty"),
+                    str_field(item, "patient_specific_uncertainty"),
+                ),
+            ))
+        })
+        .collect();
+
     let phase3 = instance["phase3_recommendations"].as_array().cloned().unwrap_or_default();
     let mut seen = std::collections::HashSet::new();
     let mut recommendations = Vec::new();
@@ -118,9 +137,12 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
             return Err(LlmError::Duplicate(rec_id));
         }
 
-        let full_text = str_field(rec, "recommendation_text").unwrap_or_default();
+        // Show the full recommendation_text; keep the condensed note-ready form
+        // in metadata for reference.
+        let recommendation_text = str_field(rec, "recommendation_text").unwrap_or_default();
         let condensed = phase5.get(&rec_id).and_then(|p| str_field(p, "condensed_note"));
-        let text = condensed.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| full_text.clone());
+        let text = recommendation_text.clone();
+        let unc = uncertainty.get(&rec_id).cloned().unwrap_or((None, None));
 
         let safety = phase4.get(&rec_id);
         // Prefer the refined phase-4 score, else the phase-3 score.
@@ -139,6 +161,9 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
             "monitoring_plan": safety.and_then(|s| s.get("monitoring_plan")),
             "safety_score_rationale": safety.and_then(|s| s.get("safety_score_rationale")),
             "priority_rationale": priority_rationale.get(&rec_id),
+            "epistemic_uncertainty": unc.0,
+            "patient_specific_uncertainty": unc.1,
+            "condensed_note": condensed,
         });
 
         recommendations.push(Recommendation {
@@ -153,7 +178,7 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
             safety_score,
             title: Some(format!("Recommendation {rec_id}")),
             text,
-            full_text: Some(full_text),
+            full_text: None,
             rationale: str_field(rec, "clinical_rationale"),
             metadata: Some(metadata),
             is_custom: false,
@@ -250,8 +275,8 @@ mod tests {
         assert_eq!(n.recommendations.len(), 2);
         let r1 = &n.recommendations[0];
         assert_eq!(r1.id, "PT-1:1");
-        assert_eq!(r1.text, "Condensed one");
-        assert_eq!(r1.full_text.as_deref(), Some("Full text one"));
+        assert_eq!(r1.text, "Full text one"); // recommendation_text, not condensed
+        assert_eq!(r1.full_text, None);
         assert_eq!(r1.safety_score, Some(80.0)); // phase4 refined preferred
         assert_eq!(r1.priority_rank, Some(1));
         // context + framing captured

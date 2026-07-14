@@ -66,14 +66,20 @@ export default function RecommendationCard({
   const monitoring = metaStr(rec.metadata, "monitoring_plan");
   const safetyRationale = metaStr(rec.metadata, "safety_score_rationale");
   const priorityRationale = metaStr(rec.metadata, "priority_rationale");
+  const epistemic = metaStr(rec.metadata, "epistemic_uncertainty");
+  const patientUncertainty = metaStr(rec.metadata, "patient_specific_uncertainty");
 
   const priorityTip =
     priorityRationale ??
     `Priority ${rec.priorityRank} — the board's integrated ranking (1 = highest), distinct from temperature level.`;
-  const evidenceTip = rec.evidenceTier
-    ? EVIDENCE_DEF[rec.evidenceTier] ?? `Evidence tier ${rec.evidenceTier}.`
-    : "";
-  const riskTip = rec.riskScore != null ? RISK_DEF[Math.round(rec.riskScore)] ?? "" : "";
+  // Evidence hover shows epistemic uncertainty (falls back to the tier definition).
+  const evidenceTip =
+    epistemic ?? (rec.evidenceTier ? EVIDENCE_DEF[rec.evidenceTier] ?? `Evidence tier ${rec.evidenceTier}.` : "");
+  const evidenceTitle = epistemic ? "Epistemic uncertainty" : "Evidence tier";
+  // Risk hover shows patient-specific uncertainty (falls back to the risk definition).
+  const riskTip =
+    patientUncertainty ?? (rec.riskScore != null ? RISK_DEF[Math.round(rec.riskScore)] ?? "" : "");
+  const riskTitle = patientUncertainty ? "Patient-specific uncertainty" : "Risk score";
   const safetyTip =
     rec.safetyScore != null
       ? `Safety ${rec.safetyScore}% — composite probability of avoiding serious adverse events.${safetyRationale ? " " + safetyRationale : ""}`
@@ -111,12 +117,12 @@ export default function RecommendationCard({
 
       <div className="score-row">
         {settings.showEvidence && rec.evidenceTier && (
-          <HoverInfo className={`score-badge ev-${rec.evidenceTier}`} title="Evidence tier" tip={evidenceTip}>
+          <HoverInfo className={`score-badge ev-${rec.evidenceTier}`} title={evidenceTitle} tip={evidenceTip}>
             Evidence {rec.evidenceTier}
           </HoverInfo>
         )}
         {rec.riskScore != null && (
-          <HoverInfo className={`score-badge risk-${Math.round(rec.riskScore)}`} title="Risk score" tip={riskTip}>
+          <HoverInfo className={`score-badge risk-${Math.round(rec.riskScore)}`} title={riskTitle} tip={riskTip}>
             Risk {rec.riskScore}
           </HoverInfo>
         )}
