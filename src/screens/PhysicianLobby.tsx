@@ -20,6 +20,24 @@ export default function PhysicianLobby() {
             Assigned reviewer: <strong>{assignment.reviewerDisplayName}</strong>
             {assignment.contactEmail && <> · Questions: {assignment.contactEmail}</>}
           </p>
+
+          {assignment.state !== "submitted" && (
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 20 }}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "Reset this session? This permanently discards ALL of your notes, decisions, surveys, and timers for every patient and starts over. This cannot be undone."
+                  )
+                ) {
+                  actions.resetSession();
+                }
+              }}
+            >
+              ↺ Reset session
+            </button>
+          )}
         </div>
 
         <div className="lobby-queue">

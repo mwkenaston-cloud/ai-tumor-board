@@ -20,6 +20,7 @@ export const ipc = {
   openAssignment: (path: string, password: string) =>
     invoke<Assignment>("open_assignment", { path, password }),
   loadAssignment: () => invoke<Assignment>("load_assignment"),
+  resetSession: () => invoke<Assignment>("reset_session"),
   getPatient: (patientId: string) => invoke<Patient>("get_patient", { patientId }),
   openPatient: (patientId: string) => invoke<Patient>("open_patient", { patientId }),
   saveNoteBlocks: (patientId: string, blocks: NoteBlock[]) =>

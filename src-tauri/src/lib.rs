@@ -29,6 +29,7 @@ pub fn run() {
             cipher_version,
             reviewer::open_dev_assignment,
             reviewer::open_assignment,
+            reviewer::reset_session,
             reviewer::load_assignment,
             reviewer::get_patient,
             reviewer::open_patient,

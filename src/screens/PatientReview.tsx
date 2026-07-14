@@ -35,6 +35,12 @@ export default function PatientReview() {
   const decisionFor = (recId: string) => p.decisions.find((d) => d.recommendationId === recId);
   const metrics = attributionMetrics(p.noteBlocks);
 
+  // Present recommendations in the board's priority order (1 = highest);
+  // fall back to LLM output order for any without a rank.
+  const orderedRecs = [...p.recommendations].sort(
+    (a, b) => (a.priorityRank ?? 999) - (b.priorityRank ?? 999) || a.position - b.position
+  );
+
   const onChangeBlock = (id: string, text: string) => {
     const next: NoteBlock[] = p.noteBlocks.map((b) =>
       b.id === id ? ({ ...b, currentText: text } as NoteBlock) : b
@@ -78,7 +84,7 @@ export default function PatientReview() {
                 <span className="recs-count">{p.recommendations.length}</span>
               </div>
               <div className="recs-container">
-                {p.recommendations.map((rec) => (
+                {orderedRecs.map((rec) => (
                   <RecommendationCard
                     key={rec.id}
                     rec={rec}

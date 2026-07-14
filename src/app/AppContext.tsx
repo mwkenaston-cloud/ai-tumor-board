@@ -62,6 +62,7 @@ interface AppActions {
   goHome: () => void;
   unlockAssignment: (path: string, password: string) => Promise<void>;
   useDemoAssignment: () => Promise<void>;
+  resetSession: () => Promise<void>;
   openPatient: (patientId: string) => void;
   backToLobby: () => void;
   setNoteBlocks: (patientId: string, blocks: NoteBlock[]) => void;
@@ -246,6 +247,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRole("reviewer");
     setAssignment(a);
     setPatients({});
+    setScreen("lobby");
+  }, []);
+
+  const resetSession = useCallback(async () => {
+    if (isTauri()) {
+      const a = await ipc.resetSession();
+      setAssignment(a);
+    } else {
+      setAssignment(seedAssignment());
+    }
+    setPatients({});
+    setCurrentPatientId(null);
+    setSurveyData({ perPatient: {}, general: {} });
     setScreen("lobby");
   }, []);
 
@@ -454,8 +468,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .then((a) => setAssignment(a))
           .catch((e) => console.error("complete_patient failed", e));
       }
-      // Route to the per-patient survey when enabled, else straight to the queue.
-      if (assignment?.settings.perPatientSurvey) {
+      // Route to the per-patient survey unless it was explicitly disabled
+      // (defaults on, and tolerates a package with no settings).
+      if ((assignment?.settings?.perPatientSurvey ?? true) !== false) {
         setScreen("patientSurvey");
       } else {
         backToLobby();
@@ -480,7 +495,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const startCompletion = useCallback(() => {
-    if (assignment?.settings.generalSurvey) {
+    if ((assignment?.settings?.generalSurvey ?? true) !== false) {
       setScreen("completion");
     } else {
       setScreen("submitted");
@@ -509,6 +524,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       goHome,
       unlockAssignment,
       useDemoAssignment,
+      resetSession,
       openPatient,
       backToLobby,
       setNoteBlocks,
@@ -529,6 +545,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       goHome,
       unlockAssignment,
       useDemoAssignment,
+      resetSession,
       openPatient,
       backToLobby,
       setNoteBlocks,

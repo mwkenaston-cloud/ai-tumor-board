@@ -93,13 +93,19 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
     };
     let phase4 = by_id("phase4_safety_assessment");
     let phase5 = by_id("phase5_condensed_recommendations");
-    let priority: std::collections::HashMap<String, i64> = instance
+    let ranking = instance
         .get("phase6_synthesis")
         .and_then(|s| s.get("priority_ranking"))
         .and_then(|v| v.as_array())
-        .unwrap_or(&empty)
+        .cloned()
+        .unwrap_or_default();
+    let priority: std::collections::HashMap<String, i64> = ranking
         .iter()
         .filter_map(|item| Some((rec_id_of(item)?, item.get("rank")?.as_i64()?)))
+        .collect();
+    let priority_rationale: std::collections::HashMap<String, String> = ranking
+        .iter()
+        .filter_map(|item| Some((rec_id_of(item)?, str_field(item, "rationale")?)))
         .collect();
 
     let phase3 = instance["phase3_recommendations"].as_array().cloned().unwrap_or_default();
@@ -132,6 +138,7 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
             "adverse_event_profile": safety.and_then(|s| s.get("adverse_event_profile")),
             "monitoring_plan": safety.and_then(|s| s.get("monitoring_plan")),
             "safety_score_rationale": safety.and_then(|s| s.get("safety_score_rationale")),
+            "priority_rationale": priority_rationale.get(&rec_id),
         });
 
         recommendations.push(Recommendation {

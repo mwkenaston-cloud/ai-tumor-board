@@ -12,6 +12,26 @@ function safetyClass(score: number | null): string {
   return "safety-low";
 }
 
+const EVIDENCE_DEF: Record<string, string> = {
+  I: "Evidence Tier I — high-quality RCTs, meta-analyses, or major guideline endorsements (NCCN/ESMO/ASCO).",
+  II: "Evidence Tier II — well-designed observational studies, phase II trials, or guidelines with caveats.",
+  III: "Evidence Tier III — case series, registry data, expert consensus, or extrapolation from adjacent settings.",
+  IV: "Evidence Tier IV — preclinical data, mechanistic rationale, expert opinion, or compassionate use.",
+};
+
+const RISK_DEF: Record<number, string> = {
+  1: "Risk 1 — minimal risk; widely tolerated with well-characterized toxicity.",
+  2: "Risk 2 — low–moderate risk; manageable toxicities in most patients.",
+  3: "Risk 3 — moderate risk; requires close monitoring and patient selection.",
+  4: "Risk 4 — high risk; significant toxicity/procedural risk; shared decision-making.",
+  5: "Risk 5 — very high risk; experimental/aggressive; life-threatening toxicity possible.",
+};
+
+function metaStr(meta: Record<string, unknown> | null, key: string): string | null {
+  const v = meta?.[key];
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
+
 interface Props {
   rec: Recommendation;
   decision?: RecommendationDecision;
@@ -42,7 +62,21 @@ export default function RecommendationCard({
           ? "dismissed"
           : "";
 
-  const monitoring = (rec.metadata?.monitoring_plan as string | undefined) ?? null;
+  const monitoring = metaStr(rec.metadata, "monitoring_plan");
+  const safetyRationale = metaStr(rec.metadata, "safety_score_rationale");
+  const priorityRationale = metaStr(rec.metadata, "priority_rationale");
+
+  const priorityTip =
+    priorityRationale ??
+    `Priority ${rec.priorityRank} — the board's integrated ranking (1 = highest), distinct from temperature level.`;
+  const evidenceTip = rec.evidenceTier
+    ? EVIDENCE_DEF[rec.evidenceTier] ?? `Evidence tier ${rec.evidenceTier}.`
+    : "";
+  const riskTip = rec.riskScore != null ? RISK_DEF[Math.round(rec.riskScore)] ?? "" : "";
+  const safetyTip =
+    rec.safetyScore != null
+      ? `Safety ${rec.safetyScore}% — composite probability of avoiding serious adverse events.${safetyRationale ? " " + safetyRationale : ""}`
+      : "";
 
   return (
     <div className={`rec-card ${cardClass}`}>
@@ -63,7 +97,7 @@ export default function RecommendationCard({
       <div className="priority-banner">
         <span className="rec-id-label">{rec.title ?? rec.id}</span>
         {settings.showPriority && rec.priorityRank != null && (
-          <span className={`prio-badge prio-${rec.priorityRank}`}>
+          <span className={`prio-badge prio-${rec.priorityRank}`} style={{ cursor: "help" }} title={priorityTip}>
             Priority {rec.priorityRank}
           </span>
         )}
@@ -76,17 +110,17 @@ export default function RecommendationCard({
 
       <div className="score-row">
         {settings.showEvidence && rec.evidenceTier && (
-          <span className={`score-badge ev-${rec.evidenceTier}`}>
+          <span className={`score-badge ev-${rec.evidenceTier}`} style={{ cursor: "help" }} title={evidenceTip}>
             Evidence {rec.evidenceTier}
           </span>
         )}
         {rec.riskScore != null && (
-          <span className={`score-badge risk-${Math.round(rec.riskScore)}`}>
+          <span className={`score-badge risk-${Math.round(rec.riskScore)}`} style={{ cursor: "help" }} title={riskTip}>
             Risk {rec.riskScore}
           </span>
         )}
         {settings.showSafety && rec.safetyScore != null && (
-          <span className={`score-badge ${safetyClass(rec.safetyScore)}`}>
+          <span className={`score-badge ${safetyClass(rec.safetyScore)}`} style={{ cursor: "help" }} title={safetyTip}>
             Safety {rec.safetyScore}%
           </span>
         )}

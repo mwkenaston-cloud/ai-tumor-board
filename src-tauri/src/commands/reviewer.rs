@@ -82,6 +82,30 @@ fn with_session<T>(
     f(session)
 }
 
+/// Discard all of this reviewer's work (notes, decisions, surveys, audit, timers)
+/// and reset every assigned patient to not-started — a full fresh start.
+#[tauri::command]
+pub fn reset_session(state: State<SessionState>) -> Result<Assignment, String> {
+    with_session(&state, |s| {
+        let rid = s.reviewer_id.clone();
+        let tx = s.conn.transaction().map_err(map_err)?;
+        for table in ["note_blocks", "recommendation_decisions", "survey_responses", "audit_events"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE reviewer_id = ?1"), [rid.as_str()])
+                .map_err(map_err)?;
+        }
+        tx.execute(
+            "UPDATE patients SET status='not_started', started_at=NULL, completed_at=NULL, elapsed_seconds=0
+             WHERE patient_id IN (SELECT patient_id FROM reviewer_assignments WHERE reviewer_id = ?1)",
+            [rid.as_str()],
+        )
+        .map_err(map_err)?;
+        tx.execute("UPDATE reviewers SET assignment_status='ready' WHERE reviewer_id = ?1", [rid.as_str()])
+            .map_err(map_err)?;
+        tx.commit().map_err(map_err)?;
+        repo::load_assignment(&s.conn, &rid).map_err(map_err)
+    })
+}
+
 #[tauri::command]
 pub fn load_assignment(state: State<SessionState>) -> Result<Assignment, String> {
     with_session(&state, |s| {
