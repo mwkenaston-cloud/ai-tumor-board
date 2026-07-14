@@ -9,6 +9,7 @@ import {
   type ResponsesView,
   type Batch,
   type AggPatient,
+  type ReviewerGrid,
 } from "../services/ipc";
 
 export default function CoordinatorScreen() {
@@ -19,7 +20,7 @@ export default function CoordinatorScreen() {
   const [summary, setSummary] = useState<CoordinatorSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"build" | "responses">("build");
+  const [tab, setTab] = useState<"build" | "reviewers" | "responses">("build");
 
   const refresh = async () => {
     try {
@@ -111,6 +112,9 @@ export default function CoordinatorScreen() {
             <button className={`btn btn-sm ${tab === "build" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("build")}>
               Build &amp; assign
             </button>
+            <button className={`btn btn-sm ${tab === "reviewers" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("reviewers")}>
+              Reviewers
+            </button>
             <button className={`btn btn-sm ${tab === "responses" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("responses")}>
               Responses &amp; results
             </button>
@@ -150,6 +154,8 @@ export default function CoordinatorScreen() {
               <BuildPackagePanel summary={summary} onBuilt={refresh} />
             </div>
           </div>
+        ) : tab === "reviewers" ? (
+          <ReviewersTab />
         ) : (
           <ResponsesTab />
         )}
@@ -419,9 +425,97 @@ function ResponsesTab() {
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 24, alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <ImportResponsePanel onImported={load} resultsCount={view?.responseCount ?? 0} />
+        <ExportAnalysisPanel />
         <BatchesPanel batches={view?.batches ?? []} />
       </div>
       <AggregatePanel view={view} />
+    </div>
+  );
+}
+
+function ExportAnalysisPanel() {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const exportAnalysis = async () => {
+    setMsg(null); setErr(null);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const destination = await saveDialog({
+      defaultPath: `TumorBoard_Analysis_${stamp}.json`,
+      filters: [{ name: "Analysis JSON", extensions: ["json"] }],
+    });
+    if (!destination) return;
+    try {
+      const r = await coordinatorIpc.exportAnalysis(destination);
+      setMsg(`Exported ${r.recordCount} records. JSON + CSV written next to each other.`);
+    } catch (e) {
+      setErr("Could not export analysis.");
+      console.error(e);
+    }
+  };
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
+      <SectionTitle>Analysis export</SectionTitle>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 10px" }}>
+        Pooled, analysis-ready export across all imported responses — a lossless JSON and a flat CSV
+        (one row per reviewer × patient × recommendation) with timing, note text, original AI text,
+        accept/dismiss/alter flags, edit distance/similarity, and authorship breakdown.
+      </p>
+      <button className="btn btn-primary btn-sm" onClick={exportAnalysis}>Export analysis (JSON + CSV)…</button>
+      {msg && <div style={{ color: "var(--success)", fontSize: 12, marginTop: 8 }}>{msg}</div>}
+      {err && <div className="form-error">{err}</div>}
+    </div>
+  );
+}
+
+function ReviewersTab() {
+  const [grid, setGrid] = useState<ReviewerGrid | null>(null);
+  useEffect(() => {
+    coordinatorIpc.reviewers().then(setGrid).catch((e) => console.error(e));
+  }, []);
+
+  if (!grid) return <div className="doc-empty">Loading…</div>;
+  if (grid.reviewers.length === 0)
+    return <div className="doc-empty">No reviewers yet. Build an assignment package to add reviewers.</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900 }}>
+      {grid.reviewers.map((rv) => (
+        <div key={rv.reviewerId} style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+            <div>
+              <strong style={{ fontSize: 15, color: "#1e293b" }}>{rv.displayName ?? rv.reviewerId}</strong>
+              <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>{rv.reviewerId}</span>
+            </div>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}>
+              {rv.assignments.length} batch{rv.assignments.length === 1 ? "" : "es"}
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {rv.assignments.map((a) => (
+              <div key={a.assignmentId} style={{ borderLeft: "3px solid var(--border-2)", paddingLeft: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "var(--muted)" }}>{a.assignmentId}</span>
+                  <span style={{ fontSize: 11, color: "var(--muted-2)" }}>· {a.createdAt.slice(0, 10)}</span>
+                  <span className={`status-chip ${a.responded ? "complete" : "not_started"}`}>
+                    {a.responded ? "Responded" : "Awaiting"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {a.patients.map((p) => (
+                    <span key={p.patientId} style={{ fontSize: 11, background: "var(--surface-2)", border: "1px solid var(--border-2)", borderRadius: 6, padding: "2px 8px", color: "var(--text-2)" }}>
+                      {p.researchId ?? p.patientId}
+                      {p.modelId && <span style={{ color: "var(--muted-2)" }}> · {p.modelId}</span>}
+                    </span>
+                  ))}
+                  {a.patients.length === 0 && <span style={{ fontSize: 11, color: "var(--muted-2)" }}>(patient list not recorded)</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

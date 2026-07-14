@@ -321,6 +321,19 @@ pub fn coordinator_build_package(
                 params![receipt.assignment_id, reviewer_id, display_name, receipt.patient_count as i64, receipt.sha256, now_iso()],
             )
             .map_err(map_err)?;
+        // Snapshot which patients went into this batch (for the reviewer grid).
+        for pid in &patient_ids {
+            let (rid, mid): (Option<String>, Option<String>) = s
+                .conn
+                .query_row("SELECT research_id, model_id FROM patients WHERE patient_id = ?1", [pid], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap_or((None, None));
+            s.conn
+                .execute(
+                    "INSERT OR REPLACE INTO sent_assignment_patients(assignment_id, patient_id, research_id, model_id) VALUES (?1,?2,?3,?4)",
+                    params![receipt.assignment_id, pid, rid, mid],
+                )
+                .map_err(map_err)?;
+        }
         Ok(receipt)
     })
 }
@@ -329,7 +342,10 @@ fn ensure_sent_table(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sent_assignments (
              assignment_id TEXT PRIMARY KEY, reviewer_id TEXT NOT NULL, display_name TEXT,
-             patient_count INTEGER NOT NULL, sha256 TEXT, created_at TEXT NOT NULL);",
+             patient_count INTEGER NOT NULL, sha256 TEXT, created_at TEXT NOT NULL);
+         CREATE TABLE IF NOT EXISTS sent_assignment_patients (
+             assignment_id TEXT NOT NULL, patient_id TEXT NOT NULL, research_id TEXT, model_id TEXT,
+             PRIMARY KEY (assignment_id, patient_id));",
     )
 }
 
@@ -621,6 +637,359 @@ fn aggregate_patients(
     Ok(out)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridPatient {
+    pub patient_id: String,
+    pub research_id: Option<String>,
+    pub model_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridAssignment {
+    pub assignment_id: String,
+    pub created_at: String,
+    pub responded: bool,
+    pub patients: Vec<GridPatient>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GridReviewer {
+    pub reviewer_id: String,
+    pub display_name: Option<String>,
+    pub assignments: Vec<GridAssignment>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewerGrid {
+    pub reviewers: Vec<GridReviewer>,
+}
+
+/// Every reviewer that has been sent at least one batch, with each batch's
+/// assigned patients and which `.atb` (assignment id) they went out in.
+#[tauri::command]
+pub fn coordinator_reviewers(state: State<CoordinatorState>) -> Result<ReviewerGrid, String> {
+    with_session(&state, |s| build_reviewer_grid(&s.conn).map_err(map_err))
+}
+
+fn build_reviewer_grid(conn: &Connection) -> Result<ReviewerGrid, rusqlite::Error> {
+    if !table_exists(conn, "sent_assignments") {
+        return Ok(ReviewerGrid { reviewers: vec![] });
+    }
+    let has_imported = table_exists(conn, "imported_responses");
+    let has_patients = table_exists(conn, "sent_assignment_patients");
+
+    // Distinct reviewers, most recent first.
+    let mut rstmt = conn.prepare(
+        "SELECT reviewer_id, MAX(display_name), MAX(created_at) AS last
+         FROM sent_assignments GROUP BY reviewer_id ORDER BY last DESC",
+    )?;
+    let reviewer_ids: Vec<(String, Option<String>)> = rstmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut reviewers = Vec::new();
+    for (rid, name) in reviewer_ids {
+        let mut astmt = conn.prepare(
+            "SELECT assignment_id, created_at FROM sent_assignments WHERE reviewer_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let asgs: Vec<(String, String)> = astmt
+            .query_map([&rid], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut assignments = Vec::new();
+        for (aid, created_at) in asgs {
+            let responded = has_imported
+                && conn
+                    .query_row(
+                        "SELECT count(*) FROM imported_responses WHERE assignment_id = ?1 AND reviewer_id = ?2",
+                        params![aid, rid],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0)
+                    > 0;
+            let patients = if has_patients {
+                let mut pstmt = conn.prepare(
+                    "SELECT patient_id, research_id, model_id FROM sent_assignment_patients WHERE assignment_id = ?1",
+                )?;
+                let rows: Vec<GridPatient> = pstmt
+                    .query_map([&aid], |r| {
+                        Ok(GridPatient { patient_id: r.get(0)?, research_id: r.get(1)?, model_id: r.get(2)? })
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                rows
+            } else {
+                vec![]
+            };
+            assignments.push(GridAssignment { assignment_id: aid, created_at, responded, patients });
+        }
+        reviewers.push(GridReviewer { reviewer_id: rid, display_name: name, assignments });
+    }
+    Ok(ReviewerGrid { reviewers })
+}
+
+// ── Analysis export ─────────────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AnalysisRecord {
+    reviewer_id: String,
+    assignment_id: String,
+    submitted_at: Option<String>,
+    source_assignment_sha256: Option<String>,
+    app_version: Option<String>,
+    schema_version: Option<i64>,
+    patient_id: String,
+    research_id: Option<String>,
+    model_id: Option<String>,
+    cancer_type: Option<String>,
+    clinical_question: Option<String>,
+    patient_status: String,
+    elapsed_seconds: i64,
+    note_word_count: i64,
+    note_char_count: i64,
+    pct_physician_original: f64,
+    pct_ai_unmodified: f64,
+    pct_ai_edited: f64,
+    pct_derived_from_llm: f64,
+    chars_typed_by_physician: i64,
+    chars_from_llm_unmodified: i64,
+    chars_from_llm_edited: i64,
+    final_note_text: String,
+    recommendation_id: String,
+    title: String,
+    temperature_level: Option<i64>,
+    temperature_label: Option<String>,
+    evidence_tier: Option<String>,
+    risk_score: Option<f64>,
+    safety_score: Option<f64>,
+    priority_rank: Option<i64>,
+    original_ai_text: String,
+    disposition: String, // accepted / dismissed / ignored
+    status: String,      // used / used-and-edited / dismissed / (none)
+    was_used: i64,
+    was_altered: i64,
+    edit_distance: Option<i64>,
+    similarity_percent: Option<f64>,
+    final_text_in_note: Option<String>,
+    dismissal_reason: Option<String>,
+    decided_at: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPaths {
+    pub json_path: String,
+    pub csv_path: String,
+    pub record_count: usize,
+}
+
+/// Write a comprehensive analysis export: a lossless JSON (all responses + a
+/// flat record per reviewer×patient×recommendation) and a poolable CSV of those
+/// flat records with every manuscript-relevant variable.
+#[tauri::command]
+pub fn coordinator_export_analysis(
+    state: State<CoordinatorState>,
+    destination: String,
+) -> Result<ExportPaths, String> {
+    with_session(&state, |s| {
+        let (records, raw): (Vec<AnalysisRecord>, Vec<serde_json::Value>) =
+            build_analysis(&s.conn).map_err(map_err)?;
+        let study_title: String = s
+            .conn
+            .query_row("SELECT title FROM studies LIMIT 1", [], |r| r.get(0))
+            .unwrap_or_else(|_| "AI Tumor Board".into());
+
+        let base = destination
+            .trim_end_matches(".json")
+            .trim_end_matches(".csv")
+            .to_string();
+        let json_path = format!("{base}.json");
+        let csv_path = format!("{base}.csv");
+
+        let doc = serde_json::json!({
+            "format": "AI_TUMOR_BOARD_ANALYSIS",
+            "version": 1,
+            "exported_at": now_iso(),
+            "study_title": study_title,
+            "response_count": raw.len(),
+            "records": records,
+            "raw_responses": raw,
+        });
+        std::fs::write(&json_path, serde_json::to_string_pretty(&doc).unwrap()).map_err(map_err)?;
+        std::fs::write(&csv_path, records_to_csv(&records)).map_err(map_err)?;
+
+        Ok(ExportPaths { json_path, csv_path, record_count: records.len() })
+    })
+}
+
+fn build_analysis(
+    conn: &Connection,
+) -> Result<(Vec<AnalysisRecord>, Vec<serde_json::Value>), rusqlite::Error> {
+    let mut raw: Vec<serde_json::Value> = Vec::new();
+    if table_exists(conn, "response_payloads") {
+        let mut stmt = conn.prepare("SELECT payload_json FROM response_payloads")?;
+        raw = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .filter_map(|row| row.ok())
+            .filter_map(|txt| serde_json::from_str::<serde_json::Value>(&txt).ok())
+            .collect();
+    }
+
+    let s = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
+    let f = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_f64()).unwrap_or(0.0);
+    let i = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
+
+    let mut records = Vec::new();
+    for payload in &raw {
+        let header = payload.get("header").cloned().unwrap_or(serde_json::Value::Null);
+        let reviewer_id = s(&header, "reviewerId").unwrap_or_default();
+        let assignment_id = s(&header, "assignmentId").unwrap_or_default();
+        let submitted_at = s(&header, "submittedAt");
+        let source_sha = s(&header, "sourceAssignmentSha256");
+        let app_version = s(&header, "appVersion");
+        let schema_version = header.get("schemaVersion").and_then(|x| x.as_i64());
+
+        let Some(patients) = payload.get("patients").and_then(|v| v.as_array()) else { continue };
+        for pt in patients {
+            let patient_id = s(pt, "patientId").unwrap_or_default();
+            let attribution = pt.get("attribution").cloned().unwrap_or(serde_json::Value::Null);
+            let final_note = s(pt, "finalText").unwrap_or_default();
+
+            // Patient identity from the workspace.
+            let (model_id_ws, cancer_type, clinical_question): (Option<String>, Option<String>, Option<String>) = conn
+                .query_row("SELECT model_id, cancer_type, clinical_question FROM patients WHERE patient_id = ?1", [&patient_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap_or((None, None, None));
+
+            // Decisions keyed by recommendation id.
+            let mut dmap: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+            if let Some(ds) = pt.get("decisions").and_then(|v| v.as_array()) {
+                for d in ds {
+                    if let Some(rid) = s(d, "recommendationId") {
+                        dmap.insert(rid, d.clone());
+                    }
+                }
+            }
+
+            // Workspace recommendation set for this patient.
+            let mut rstmt = conn.prepare(
+                "SELECT recommendation_id, COALESCE(title, recommendation_id), temperature_level, temperature_label,
+                        evidence_tier, risk_score, safety_score, priority_rank, recommendation_text
+                 FROM recommendations WHERE patient_id = ?1 ORDER BY position",
+            )?;
+            let recs = rstmt.query_map([&patient_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?, r.get::<_, Option<f64>>(5)?, r.get::<_, Option<f64>>(6)?, r.get::<_, Option<i64>>(7)?, r.get::<_, String>(8)?,
+                ))
+            })?.collect::<Result<Vec<_>, _>>()?;
+
+            for (rid, title, temp, temp_label, ev, risk, safety, prio, ai_text) in recs {
+                let dec = dmap.get(&rid);
+                let status = dec.and_then(|d| s(d, "status")).unwrap_or_default();
+                let disposition = if status.starts_with("used") {
+                    "accepted"
+                } else if status == "dismissed" {
+                    "dismissed"
+                } else {
+                    "ignored"
+                };
+                records.push(AnalysisRecord {
+                    reviewer_id: reviewer_id.clone(),
+                    assignment_id: assignment_id.clone(),
+                    submitted_at: submitted_at.clone(),
+                    source_assignment_sha256: source_sha.clone(),
+                    app_version: app_version.clone(),
+                    schema_version,
+                    patient_id: patient_id.clone(),
+                    research_id: s(pt, "researchId"),
+                    model_id: model_id_ws.clone(),
+                    cancer_type: cancer_type.clone(),
+                    clinical_question: clinical_question.clone(),
+                    patient_status: s(pt, "status").unwrap_or_default(),
+                    elapsed_seconds: i(pt, "elapsedSeconds"),
+                    note_word_count: i(&attribution, "wordCount"),
+                    note_char_count: i(&attribution, "charCount"),
+                    pct_physician_original: f(&attribution, "pctPhysicianOriginal"),
+                    pct_ai_unmodified: f(&attribution, "pctAiUnmodified"),
+                    pct_ai_edited: f(&attribution, "pctAiEdited"),
+                    pct_derived_from_llm: f(&attribution, "pctDerivedFromLlm"),
+                    chars_typed_by_physician: i(&attribution, "charsTypedByPhysician"),
+                    chars_from_llm_unmodified: i(&attribution, "charsFromLlmUnmodified"),
+                    chars_from_llm_edited: i(&attribution, "charsFromLlmEdited"),
+                    final_note_text: final_note.clone(),
+                    recommendation_id: rid,
+                    title,
+                    temperature_level: temp,
+                    temperature_label: temp_label,
+                    evidence_tier: ev,
+                    risk_score: risk,
+                    safety_score: safety,
+                    priority_rank: prio,
+                    original_ai_text: ai_text,
+                    disposition: disposition.to_string(),
+                    status: status.clone(),
+                    was_used: if disposition == "accepted" { 1 } else { 0 },
+                    was_altered: if status == "used-and-edited" { 1 } else { 0 },
+                    edit_distance: dec.and_then(|d| d.get("editDistance").and_then(|x| x.as_i64())),
+                    similarity_percent: dec.and_then(|d| d.get("similarityPercent").and_then(|x| x.as_f64())),
+                    final_text_in_note: dec.and_then(|d| s(d, "finalText")),
+                    dismissal_reason: dec.and_then(|d| s(d, "dismissalReason")),
+                    decided_at: dec.and_then(|d| s(d, "decidedAt")),
+                });
+            }
+        }
+    }
+    Ok((records, raw))
+}
+
+fn csv_field(s: &str) -> String {
+    if s.contains(['"', ',', '\n', '\r']) {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+fn records_to_csv(records: &[AnalysisRecord]) -> String {
+    let header = [
+        "reviewer_id", "assignment_id", "submitted_at", "source_assignment_sha256", "app_version", "schema_version",
+        "patient_id", "research_id", "model_id", "cancer_type", "clinical_question", "patient_status", "elapsed_seconds",
+        "note_word_count", "note_char_count", "pct_physician_original", "pct_ai_unmodified", "pct_ai_edited",
+        "pct_derived_from_llm", "chars_typed_by_physician", "chars_from_llm_unmodified", "chars_from_llm_edited",
+        "recommendation_id", "title", "temperature_level", "temperature_label", "evidence_tier", "risk_score",
+        "safety_score", "priority_rank", "disposition", "status", "was_used", "was_altered", "edit_distance",
+        "similarity_percent", "original_ai_text", "final_text_in_note", "dismissal_reason", "decided_at", "final_note_text",
+    ];
+    let os = |o: &Option<String>| o.clone().unwrap_or_default();
+    let oi = |o: &Option<i64>| o.map(|v| v.to_string()).unwrap_or_default();
+    let of = |o: &Option<f64>| o.map(|v| v.to_string()).unwrap_or_default();
+
+    let mut out = String::new();
+    out.push_str(&header.join(","));
+    out.push('\n');
+    for r in records {
+        let cols = [
+            r.reviewer_id.clone(), r.assignment_id.clone(), os(&r.submitted_at), os(&r.source_assignment_sha256),
+            os(&r.app_version), oi(&r.schema_version), r.patient_id.clone(), os(&r.research_id), os(&r.model_id),
+            os(&r.cancer_type), os(&r.clinical_question), r.patient_status.clone(), r.elapsed_seconds.to_string(),
+            r.note_word_count.to_string(), r.note_char_count.to_string(), r.pct_physician_original.to_string(),
+            r.pct_ai_unmodified.to_string(), r.pct_ai_edited.to_string(), r.pct_derived_from_llm.to_string(),
+            r.chars_typed_by_physician.to_string(), r.chars_from_llm_unmodified.to_string(), r.chars_from_llm_edited.to_string(),
+            r.recommendation_id.clone(), r.title.clone(), oi(&r.temperature_level), os(&r.temperature_label),
+            os(&r.evidence_tier), of(&r.risk_score), of(&r.safety_score), oi(&r.priority_rank), r.disposition.clone(),
+            r.status.clone(), r.was_used.to_string(), r.was_altered.to_string(), oi(&r.edit_distance), of(&r.similarity_percent),
+            r.original_ai_text.clone(), os(&r.final_text_in_note), os(&r.dismissal_reason), os(&r.decided_at), r.final_note_text.clone(),
+        ];
+        out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
+        out.push('\n');
+    }
+    out
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 fn build_summary(conn: &Connection, provisioned: bool) -> Result<CoordinatorSummary, rusqlite::Error> {
@@ -755,5 +1124,51 @@ mod tests {
         assert_eq!((r1.accepted, r1.dismissed, r1.ignored), (2, 0, 0));
         let r2 = p.recommendations.iter().find(|r| r.recommendation_id == "PT-1:2").unwrap();
         assert_eq!((r2.accepted, r2.dismissed, r2.ignored), (0, 1, 1));
+    }
+
+    #[test]
+    fn analysis_export_flattens_records() {
+        let conn = container::create(&tmp(), "pw", ContainerRole::Coordinator).unwrap();
+        conn.execute("INSERT INTO studies(study_id,title,protocol_version,schema_version,created_at) VALUES ('STUDY-1','AI Tumor Board','v1',1,'t')", []).unwrap();
+        conn.execute("INSERT INTO patients(patient_id,study_id,research_id,model_id,cancer_type,clinical_question,display_label,position,status,elapsed_seconds) VALUES ('PT-1','STUDY-1','R1','m1','Lung','Tx?','L',0,'complete',300)", []).unwrap();
+        conn.execute("INSERT INTO recommendations(recommendation_id,patient_id,position,title,recommendation_text,evidence_tier,risk_score,is_custom) VALUES ('PT-1:1','PT-1',0,'Rec 1','AI text one','I',2,0)", []).unwrap();
+        conn.execute("INSERT INTO recommendations(recommendation_id,patient_id,position,title,recommendation_text,is_custom) VALUES ('PT-1:2','PT-1',1,'Rec 2','AI text two',0)", []).unwrap();
+        conn.execute_batch("CREATE TABLE response_payloads(assignment_id TEXT, reviewer_id TEXT, payload_json TEXT);").unwrap();
+
+        let payload = serde_json::json!({
+            "header": {"reviewerId":"REV-A","assignmentId":"ASG-1","submittedAt":"2026-07-10T00:00:00Z"},
+            "patients": [{
+                "patientId":"PT-1","researchId":"R1","status":"complete","elapsedSeconds":300,
+                "attribution": {"wordCount":50,"charCount":300,"pctPhysicianOriginal":40.0,"pctAiUnmodified":30.0,"pctAiEdited":30.0,"pctDerivedFromLlm":60.0,"charsTypedByPhysician":120,"charsFromLlmUnmodified":90,"charsFromLlmEdited":90},
+                "finalText":"Final note text.",
+                "decisions": [
+                    {"recommendationId":"PT-1:1","status":"used-and-edited","editDistance":12,"similarityPercent":80.0,"finalText":"edited","decidedAt":"2026-07-10T00:01:00Z"},
+                    {"recommendationId":"PT-1:2","status":"dismissed","dismissalReason":"not appropriate","decidedAt":"2026-07-10T00:02:00Z"}
+                ]
+            }]
+        });
+        conn.execute("INSERT INTO response_payloads(assignment_id,reviewer_id,payload_json) VALUES ('ASG-1','REV-A',?1)", [payload.to_string()]).unwrap();
+
+        let (records, raw) = build_analysis(&conn).unwrap();
+        assert_eq!(raw.len(), 1);
+        assert_eq!(records.len(), 2);
+        let r1 = records.iter().find(|r| r.recommendation_id == "PT-1:1").unwrap();
+        assert_eq!(r1.disposition, "accepted");
+        assert_eq!(r1.was_used, 1);
+        assert_eq!(r1.was_altered, 1);
+        assert_eq!(r1.edit_distance, Some(12));
+        assert_eq!(r1.similarity_percent, Some(80.0));
+        assert_eq!(r1.original_ai_text, "AI text one");
+        assert_eq!(r1.elapsed_seconds, 300);
+        assert_eq!(r1.model_id.as_deref(), Some("m1"));
+        assert_eq!(r1.final_text_in_note.as_deref(), Some("edited"));
+        let r2 = records.iter().find(|r| r.recommendation_id == "PT-1:2").unwrap();
+        assert_eq!(r2.disposition, "dismissed");
+        assert_eq!(r2.was_used, 0);
+        assert_eq!(r2.dismissal_reason.as_deref(), Some("not appropriate"));
+        // CSV = header + 2 rows.
+        let csv = records_to_csv(&records);
+        assert_eq!(csv.lines().count(), 3);
+        assert!(csv.starts_with("reviewer_id,assignment_id"));
     }
 }

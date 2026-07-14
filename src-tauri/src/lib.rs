@@ -53,6 +53,8 @@ pub fn run() {
             coordinator::coordinator_import_response,
             coordinator::coordinator_list_results,
             coordinator::coordinator_responses,
+            coordinator::coordinator_reviewers,
+            coordinator::coordinator_export_analysis,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

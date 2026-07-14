@@ -127,6 +127,30 @@ export interface ResponsesView {
   reviewers: string[];
   patients: AggPatient[];
 }
+export interface GridPatient {
+  patientId: string;
+  researchId: string | null;
+  modelId: string | null;
+}
+export interface GridAssignment {
+  assignmentId: string;
+  createdAt: string;
+  responded: boolean;
+  patients: GridPatient[];
+}
+export interface GridReviewer {
+  reviewerId: string;
+  displayName: string | null;
+  assignments: GridAssignment[];
+}
+export interface ReviewerGrid {
+  reviewers: GridReviewer[];
+}
+export interface ExportPaths {
+  jsonPath: string;
+  csvPath: string;
+  recordCount: number;
+}
 
 export const coordinatorIpc = {
   openWorkspace: () => invoke<CoordinatorSummary>("coordinator_open_workspace"),
@@ -159,4 +183,7 @@ export const coordinatorIpc = {
     invoke<ImportSummary>("coordinator_import_response", { atbrPath }),
   listResults: () => invoke<ResultRow[]>("coordinator_list_results"),
   responses: () => invoke<ResponsesView>("coordinator_responses"),
+  reviewers: () => invoke<ReviewerGrid>("coordinator_reviewers"),
+  exportAnalysis: (destination: string) =>
+    invoke<ExportPaths>("coordinator_export_analysis", { destination }),
 };
