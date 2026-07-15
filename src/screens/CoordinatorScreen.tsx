@@ -10,6 +10,7 @@ import {
   type Batch,
   type AggPatient,
   type ReviewerGrid,
+  type ResultRow,
 } from "../services/ipc";
 
 export default function CoordinatorScreen() {
@@ -334,9 +335,11 @@ function ImportResponsePanel({ onImported, resultsCount }: { onImported: () => v
 
 function ResponsesTab() {
   const [view, setView] = useState<ResponsesView | null>(null);
+  const [results, setResults] = useState<ResultRow[]>([]);
   const load = async () => {
     try {
       setView(await coordinatorIpc.responses());
+      setResults(await coordinatorIpc.listResults());
     } catch (e) {
       console.error(e);
     }
@@ -345,20 +348,57 @@ function ResponsesTab() {
     load();
   }, []);
 
+  const deleteResponse = async (aid: string, rid: string) => {
+    await coordinatorIpc.deleteResponse(aid, rid);
+    load();
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: 24, alignItems: "start" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <ImportResponsePanel onImported={load} resultsCount={view?.responseCount ?? 0} />
+        <ImportedResponsesPanel results={results} onDelete={deleteResponse} />
         <ExportAnalysisPanel />
-        <BatchesPanel
-          batches={view?.batches ?? []}
-          onDeleteResponse={async (aid, rid) => {
-            await coordinatorIpc.deleteResponse(aid, rid);
-            load();
-          }}
-        />
+        <BatchesPanel batches={view?.batches ?? []} onDeleteResponse={deleteResponse} />
       </div>
       <AggregatePanel view={view} />
+    </div>
+  );
+}
+
+function ImportedResponsesPanel({ results, onDelete }: { results: ResultRow[]; onDelete: (aid: string, rid: string) => void }) {
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
+      <SectionTitle>Imported responses ({results.length})</SectionTitle>
+      {results.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--muted-2)" }}>No responses imported yet.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {results.map((r) => (
+            <div key={`${r.assignmentId}:${r.reviewerId}`} style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid var(--border-2)", paddingBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{r.reviewerId}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                  <span style={{ fontFamily: "var(--font-mono)" }}>{r.assignmentId.slice(0, 18)}…</span>
+                  {r.submittedAt && <> · submitted {r.submittedAt.slice(0, 10)}</>}
+                  {" · imported "}{r.importedAt.slice(0, 10)}
+                </div>
+              </div>
+              <button
+                className="nb-remove-btn"
+                title="Drop this imported response"
+                onClick={() => {
+                  if (window.confirm(`Drop the imported response from ${r.reviewerId}? The aggregate and analysis export will update. This cannot be undone.`)) {
+                    onDelete(r.assignmentId, r.reviewerId);
+                  }
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
