@@ -81,6 +81,39 @@ with `signtool`). EV certs get SmartScreen reputation fastest.
 For institutional rollout, prefer managed software deployment (Jamf / Intune /
 SCCM) over emailing installers.
 
+## Building BOTH macOS and Windows (the recommended path)
+
+There is no way to build a Windows installer on a Mac (or vice-versa). Use the
+included CI workflow, which builds both on GitHub's runners:
+
+1. Create a GitHub repo and push this project:
+   ```bash
+   git remote add origin <your-repo-url>
+   git push -u origin main
+   ```
+2. (Optional, for signed macOS builds) add repo **Secrets** →
+   `APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+   `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`. Without them the macOS build is
+   unsigned.
+3. Tag a release and push it:
+   ```bash
+   git tag v0.9.0 && git push origin v0.9.0
+   ```
+   (Or run the **Release** workflow manually from the Actions tab.)
+4. The workflow (`.github/workflows/release.yml`) builds the **universal macOS
+   `.dmg`** and the **Windows `.msi` + `.exe`**, then creates a **draft GitHub
+   release** with both attached. Review and publish it.
+
+This is the simplest way to get a "Mac and Windows capable output" from one
+command — you tag, CI produces both installers.
+
+## File-association launch
+
+`.atb` / `.atbr` associations are registered with the OS. Double-clicking an
+`.atb` opens the app straight to the unlock screen with that file pre-selected
+(handled via argv on Windows and the open-file Apple event on macOS). Users can
+also open the app and pick the file manually.
+
 ## The compiled-in bits (change ⇒ rebuild)
 
 - **Coordinator authority public key** (`crypto/role_credential.rs`,

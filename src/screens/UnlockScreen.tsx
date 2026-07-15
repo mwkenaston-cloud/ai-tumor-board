@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useApp } from "../app/AppContext";
 
@@ -9,11 +9,16 @@ function basename(path: string): string {
 }
 
 export default function UnlockScreen() {
-  const { actions } = useApp();
-  const [path, setPath] = useState<string | null>(null);
+  const { actions, pendingOpenPath } = useApp();
+  const [path, setPath] = useState<string | null>(pendingOpenPath);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // A file handed to the app via double-click pre-selects here.
+  useEffect(() => {
+    if (pendingOpenPath) setPath(pendingOpenPath);
+  }, [pendingOpenPath]);
 
   const pickFile = async () => {
     setError(null);

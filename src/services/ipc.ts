@@ -43,6 +43,7 @@ export const ipc = {
   exportResponseToDownloads: () =>
     invoke<ExportedResponse>("export_response_to_downloads"),
   cipherVersion: () => invoke<string | null>("cipher_version"),
+  takePendingOpen: () => invoke<string | null>("take_pending_open"),
 };
 
 export interface ResponseReceipt {

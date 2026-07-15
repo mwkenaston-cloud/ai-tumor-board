@@ -27,6 +27,7 @@ import {
   userBlock,
 } from "../services/noteBlocks";
 import { ipc, isTauri } from "../services/ipc";
+import { listen } from "@tauri-apps/api/event";
 
 export type Screen =
   | "home"
@@ -54,6 +55,8 @@ interface AppState {
   saveState: SaveState;
   surveyData: SurveyData;
   reviewSeconds: number;
+  /** A `.atb` handed to the app via double-click; the unlock screen pre-selects it. */
+  pendingOpenPath: string | null;
 }
 
 interface AppActions {
@@ -103,6 +106,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     general: {},
   });
   const [reviewSeconds, setReviewSeconds] = useState(0);
+  const [pendingOpenPath, setPendingOpenPath] = useState<string | null>(null);
+
+  // File-association launch: route a double-clicked .atb to the unlock screen.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const openFile = (path: string) => {
+      setRole("reviewer");
+      setPendingOpenPath(path);
+      setScreen("unlock");
+    };
+    ipc.takePendingOpen().then((p) => { if (p) openFile(p); }).catch(() => {});
+    const un = listen<string>("open-assignment-file", (e) => { if (e.payload) openFile(e.payload); });
+    return () => { un.then((f) => f()).catch(() => {}); };
+  }, []);
 
   const saveTimer = useRef<number | null>(null);
   const clockRef = useRef<number | null>(null);
@@ -250,6 +267,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setRole("reviewer");
     setAssignment(a);
     setPatients({});
+    setPendingOpenPath(null);
     setScreen("lobby");
   }, []);
 
@@ -620,6 +638,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveState,
     surveyData,
     reviewSeconds,
+    pendingOpenPath,
     actions,
     currentPatient,
   };
