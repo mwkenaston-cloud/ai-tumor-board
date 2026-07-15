@@ -101,6 +101,9 @@ pub struct ImportedResponse {
     pub patients: Vec<PatientResponse>,
     pub surveys: serde_json::Value,
     pub audit_count: i64,
+    /// Timestamped engagement trajectory (rec inserts/dismissals, tab views,
+    /// patient start/complete, submit) for analysis.
+    pub events: serde_json::Value,
 }
 
 // ── Build (reviewer side) ─────────────────────────────────────────────────
@@ -227,11 +230,30 @@ fn read_payload(conn: &Connection, header: &ResponseHeader) -> Result<ImportedRe
 
     let audit_count: i64 = conn.query_row("SELECT count(*) FROM audit_events", [], |r| r.get(0))?;
 
+    let mut estmt = conn.prepare(
+        "SELECT event_type, patient_id, event_time, payload_json FROM audit_events ORDER BY event_time",
+    )?;
+    let events: Vec<serde_json::Value> = estmt
+        .query_map([], |r| {
+            let etype: String = r.get(0)?;
+            let pid: Option<String> = r.get(1)?;
+            let etime: String = r.get(2)?;
+            let payload: Option<String> = r.get(3)?;
+            Ok(serde_json::json!({
+                "eventType": etype,
+                "patientId": pid,
+                "eventTime": etime,
+                "payload": payload.and_then(|p| serde_json::from_str::<serde_json::Value>(&p).ok()),
+            }))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
     Ok(ImportedResponse {
         header: header.clone(),
         patients,
         surveys: serde_json::Value::Array(surveys),
         audit_count,
+        events: serde_json::Value::Array(events),
     })
 }
 

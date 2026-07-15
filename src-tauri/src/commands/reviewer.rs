@@ -203,6 +203,25 @@ pub fn save_elapsed(
     })
 }
 
+/// Append a timestamped audit event (rec inserted/dismissed/removed, tab views,
+/// etc.) so a reviewer's engagement trajectory can be reconstructed.
+#[tauri::command]
+pub fn append_audit(
+    state: State<SessionState>,
+    patient_id: Option<String>,
+    event_type: String,
+    payload: Option<serde_json::Value>,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        repo::append_audit(
+            &s.conn,
+            Some(&s.reviewer_id),
+            &AuditEvent { event_type, patient_id, event_time: repo::now_iso(), payload },
+        )
+        .map_err(map_err)
+    })
+}
+
 #[tauri::command]
 pub fn save_decision(
     state: State<SessionState>,

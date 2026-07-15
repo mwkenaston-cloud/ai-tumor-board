@@ -217,6 +217,109 @@ pub fn coordinator_add_document(
     })
 }
 
+/// Add (or rename) a reviewer in the roster.
+#[tauri::command]
+pub fn coordinator_add_reviewer(
+    state: State<CoordinatorState>,
+    reviewer_id: String,
+    display_name: String,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        s.conn
+            .execute(
+                "INSERT OR REPLACE INTO reviewers(reviewer_id, display_name, role, assignment_status)
+                 VALUES (?1, ?2, 'reviewer', 'ready')",
+                params![reviewer_id, display_name],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    })
+}
+
+/// Set the patients currently assigned to a reviewer (replaces prior assignment).
+#[tauri::command]
+pub fn coordinator_assign_patients(
+    state: State<CoordinatorState>,
+    reviewer_id: String,
+    patient_ids: Vec<String>,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        let tx = s.conn.transaction().map_err(map_err)?;
+        tx.execute("DELETE FROM reviewer_assignments WHERE reviewer_id = ?1", [reviewer_id.as_str()])
+            .map_err(map_err)?;
+        for (pos, pid) in patient_ids.iter().enumerate() {
+            tx.execute(
+                "INSERT OR REPLACE INTO reviewer_assignments(reviewer_id, patient_id, position) VALUES (?1,?2,?3)",
+                params![reviewer_id, pid, pos as i64],
+            )
+            .map_err(map_err)?;
+        }
+        tx.commit().map_err(map_err)?;
+        Ok(())
+    })
+}
+
+/// Remove a reviewer and everything associated: assignments, sent batches, and
+/// any imported responses.
+#[tauri::command]
+pub fn coordinator_delete_reviewer(
+    state: State<CoordinatorState>,
+    reviewer_id: String,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        let has_imported = table_exists(&s.conn, "imported_responses");
+        let has_payloads = table_exists(&s.conn, "response_payloads");
+        let has_sent = table_exists(&s.conn, "sent_assignments");
+        let has_sent_pat = table_exists(&s.conn, "sent_assignment_patients");
+        let rid = reviewer_id.as_str();
+        let tx = s.conn.transaction().map_err(map_err)?;
+        if has_sent_pat {
+            tx.execute(
+                "DELETE FROM sent_assignment_patients WHERE assignment_id IN
+                    (SELECT assignment_id FROM sent_assignments WHERE reviewer_id = ?1)",
+                [rid],
+            )
+            .map_err(map_err)?;
+        }
+        if has_imported {
+            tx.execute("DELETE FROM imported_responses WHERE reviewer_id = ?1", [rid]).map_err(map_err)?;
+        }
+        if has_payloads {
+            tx.execute("DELETE FROM response_payloads WHERE reviewer_id = ?1", [rid]).map_err(map_err)?;
+        }
+        if has_sent {
+            tx.execute("DELETE FROM sent_assignments WHERE reviewer_id = ?1", [rid]).map_err(map_err)?;
+        }
+        for table in ["reviewer_assignments", "recommendation_decisions", "note_blocks", "survey_responses", "audit_events", "reviewers"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE reviewer_id = ?1"), [rid]).map_err(map_err)?;
+        }
+        tx.commit().map_err(map_err)?;
+        Ok(())
+    })
+}
+
+/// Remove a previously imported response (both the dedup record and the payload).
+#[tauri::command]
+pub fn coordinator_delete_response(
+    state: State<CoordinatorState>,
+    assignment_id: String,
+    reviewer_id: String,
+) -> Result<(), String> {
+    with_session(&state, |s| {
+        let has_imported = table_exists(&s.conn, "imported_responses");
+        let has_payloads = table_exists(&s.conn, "response_payloads");
+        let tx = s.conn.transaction().map_err(map_err)?;
+        if has_imported {
+            tx.execute("DELETE FROM imported_responses WHERE assignment_id = ?1 AND reviewer_id = ?2", params![assignment_id, reviewer_id]).map_err(map_err)?;
+        }
+        if has_payloads {
+            tx.execute("DELETE FROM response_payloads WHERE assignment_id = ?1 AND reviewer_id = ?2", params![assignment_id, reviewer_id]).map_err(map_err)?;
+        }
+        tx.commit().map_err(map_err)?;
+        Ok(())
+    })
+}
+
 /// Import a single combined clinical-source `.txt`, splitting it into per-type
 /// documents (imaging / clinical notes / pathology / labs). Replaces any
 /// existing documents for the patient. Returns the number of sections stored.
@@ -659,6 +762,9 @@ pub struct GridAssignment {
 pub struct GridReviewer {
     pub reviewer_id: String,
     pub display_name: Option<String>,
+    /// Patients currently assigned to this reviewer (the next package's contents).
+    pub assigned_patients: Vec<GridPatient>,
+    /// Packages already built (batches) for this reviewer.
     pub assignments: Vec<GridAssignment>,
 }
 
@@ -676,29 +782,46 @@ pub fn coordinator_reviewers(state: State<CoordinatorState>) -> Result<ReviewerG
 }
 
 fn build_reviewer_grid(conn: &Connection) -> Result<ReviewerGrid, rusqlite::Error> {
-    if !table_exists(conn, "sent_assignments") {
-        return Ok(ReviewerGrid { reviewers: vec![] });
-    }
+    let has_sent = table_exists(conn, "sent_assignments");
     let has_imported = table_exists(conn, "imported_responses");
     let has_patients = table_exists(conn, "sent_assignment_patients");
 
-    // Distinct reviewers, most recent first.
-    let mut rstmt = conn.prepare(
-        "SELECT reviewer_id, MAX(display_name), MAX(created_at) AS last
-         FROM sent_assignments GROUP BY reviewer_id ORDER BY last DESC",
-    )?;
-    let reviewer_ids: Vec<(String, Option<String>)> = rstmt
+    // Roster comes from the reviewers table, so reviewers appear before any
+    // package is built.
+    let mut rstmt =
+        conn.prepare("SELECT reviewer_id, display_name FROM reviewers WHERE role = 'reviewer' ORDER BY reviewer_id")?;
+    let roster: Vec<(String, Option<String>)> = rstmt
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut reviewers = Vec::new();
-    for (rid, name) in reviewer_ids {
-        let mut astmt = conn.prepare(
-            "SELECT assignment_id, created_at FROM sent_assignments WHERE reviewer_id = ?1 ORDER BY created_at DESC",
-        )?;
-        let asgs: Vec<(String, String)> = astmt
-            .query_map([&rid], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<Result<Vec<_>, _>>()?;
+    for (rid, name) in roster {
+        // Currently assigned patients (the next package's contents).
+        let assigned_patients: Vec<GridPatient> = {
+            let mut pstmt = conn.prepare(
+                "SELECT p.patient_id, p.research_id, p.model_id FROM reviewer_assignments ra
+                 JOIN patients p ON p.patient_id = ra.patient_id
+                 WHERE ra.reviewer_id = ?1 ORDER BY ra.position",
+            )?;
+            let v: Vec<GridPatient> = pstmt
+                .query_map([&rid], |r| {
+                    Ok(GridPatient { patient_id: r.get(0)?, research_id: r.get(1)?, model_id: r.get(2)? })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            v
+        };
+
+        let asgs: Vec<(String, String)> = if has_sent {
+            let mut astmt = conn.prepare(
+                "SELECT assignment_id, created_at FROM sent_assignments WHERE reviewer_id = ?1 ORDER BY created_at DESC",
+            )?;
+            let v: Vec<(String, String)> = astmt
+                .query_map([&rid], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            v
+        } else {
+            vec![]
+        };
 
         let mut assignments = Vec::new();
         for (aid, created_at) in asgs {
@@ -726,7 +849,7 @@ fn build_reviewer_grid(conn: &Connection) -> Result<ReviewerGrid, rusqlite::Erro
             };
             assignments.push(GridAssignment { assignment_id: aid, created_at, responded, patients });
         }
-        reviewers.push(GridReviewer { reviewer_id: rid, display_name: name, assignments });
+        reviewers.push(GridReviewer { reviewer_id: rid, display_name: name, assigned_patients, assignments });
     }
     Ok(ReviewerGrid { reviewers })
 }

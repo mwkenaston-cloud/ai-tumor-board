@@ -28,6 +28,8 @@ export const ipc = {
     invoke<void>("save_note_blocks", { patientId, blocks }),
   saveElapsed: (patientId: string, elapsedSeconds: number) =>
     invoke<void>("save_elapsed", { patientId, elapsedSeconds }),
+  appendAudit: (patientId: string | null, eventType: string, payload?: Record<string, unknown>) =>
+    invoke<void>("append_audit", { patientId, eventType, payload: payload ?? null }),
   saveDecision: (decision: RecommendationDecision) =>
     invoke<void>("save_decision", { decision }),
   completePatient: (patientId: string, elapsedSeconds: number) =>
@@ -141,6 +143,7 @@ export interface GridAssignment {
 export interface GridReviewer {
   reviewerId: string;
   displayName: string | null;
+  assignedPatients: GridPatient[];
   assignments: GridAssignment[];
 }
 export interface ReviewerGrid {
@@ -159,6 +162,14 @@ export const coordinatorIpc = {
     invoke<string>("coordinator_add_patient", { researchId, modelId }),
   removePatient: (patientId: string) =>
     invoke<void>("coordinator_remove_patient", { patientId }),
+  addReviewer: (reviewerId: string, displayName: string) =>
+    invoke<void>("coordinator_add_reviewer", { reviewerId, displayName }),
+  assignPatients: (reviewerId: string, patientIds: string[]) =>
+    invoke<void>("coordinator_assign_patients", { reviewerId, patientIds }),
+  deleteReviewer: (reviewerId: string) =>
+    invoke<void>("coordinator_delete_reviewer", { reviewerId }),
+  deleteResponse: (assignmentId: string, reviewerId: string) =>
+    invoke<void>("coordinator_delete_response", { assignmentId, reviewerId }),
   addDocument: (patientId: string, documentType: string, filename: string, textContent: string) =>
     invoke<void>("coordinator_add_document", { patientId, documentType, filename, textContent }),
   importDocumentFile: (patientId: string, path: string) =>

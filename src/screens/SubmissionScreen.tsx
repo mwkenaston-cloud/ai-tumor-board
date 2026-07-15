@@ -5,7 +5,7 @@ import { attributionMetrics } from "../services/noteBlocks";
 import { ipc, isTauri, type ExportedResponse } from "../services/ipc";
 
 export default function SubmissionScreen() {
-  const { assignment, patients } = useApp();
+  const { assignment, patients, actions } = useApp();
   const [exported, setExported] = useState<ExportedResponse | null>(null);
   const [exportErr, setExportErr] = useState<string | null>(null);
   const started = useRef(false);
@@ -119,6 +119,10 @@ export default function SubmissionScreen() {
             })}
           </ul>
         </div>
+
+        <button className="btn btn-ghost" style={{ marginTop: 16 }} onClick={actions.goHome}>
+          ← Return to home
+        </button>
       </div>
     </div>
   );

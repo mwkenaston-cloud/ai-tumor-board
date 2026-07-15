@@ -123,8 +123,8 @@ export default function CoordinatorScreen() {
         </div>
 
         {tab === "build" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24, alignItems: "start" }}>
-            {/* Left: patients */}
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 24, alignItems: "start" }}>
+            {/* Left: patient roster */}
             <div>
               <SectionTitle>Patients ({summary.patients.length})</SectionTitle>
               <AddPatientForm onAdded={refresh} />
@@ -146,16 +146,18 @@ export default function CoordinatorScreen() {
                   <div style={{ fontSize: 12, color: "var(--muted-2)" }}>No patients yet.</div>
                 )}
               </div>
-              {selectedPatient && <PatientDetail patient={selectedPatient} onChanged={refresh} />}
             </div>
-
-            {/* Right: build packages (batches) */}
+            {/* Right: selected patient details (documents + AI import) */}
             <div>
-              <BuildPackagePanel summary={summary} onBuilt={refresh} />
+              {selectedPatient ? (
+                <PatientDetail patient={selectedPatient} onChanged={refresh} />
+              ) : (
+                <div className="doc-empty">Select a patient to add source documents and import AI output.</div>
+              )}
             </div>
           </div>
         ) : tab === "reviewers" ? (
-          <ReviewersTab />
+          <ReviewersTab allPatients={summary.patients} />
         ) : (
           <ResponsesTab />
         )}
@@ -295,84 +297,6 @@ function PatientDetail({ patient, onChanged }: { patient: CoordPatient; onChange
   );
 }
 
-function BuildPackagePanel({ summary, onBuilt }: { summary: CoordinatorSummary; onBuilt: () => void }) {
-  const [reviewerId, setReviewerId] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [receipt, setReceipt] = useState<{ sha256: string; assignmentId: string } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const toggle = (id: string) =>
-    setPicked((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-
-  const build = async () => {
-    setErr(null); setReceipt(null);
-    if (!reviewerId.trim() || !password || picked.size === 0) return;
-    const destination = await saveDialog({
-      defaultPath: `TumorBoard_${reviewerId}.atb`,
-      filters: [{ name: "AI Tumor Board Assignment", extensions: ["atb"] }],
-    });
-    if (!destination) return;
-    setBusy(true);
-    try {
-      const r = await coordinatorIpc.buildPackage(reviewerId, displayName, [...picked], password, destination);
-      setReceipt({ sha256: r.sha256, assignmentId: r.assignmentId });
-      onBuilt();
-    } catch (e) {
-      setErr(String(e).replace(/^.*failed validation: /, "Validation failed: "));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
-      <SectionTitle>Build assignment package</SectionTitle>
-      <div style={{ fontSize: 11, color: "var(--muted-2)", marginBottom: 10 }}>
-        Each build is a batch. Build multiple packages — for different physicians, or additional
-        batches for the same physician — and track responses on the Responses tab.
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <input className="text-input" placeholder="Reviewer ID" value={reviewerId} onChange={(e) => setReviewerId(e.currentTarget.value)} />
-        <input className="text-input" placeholder="Reviewer name" value={displayName} onChange={(e) => setDisplayName(e.currentTarget.value)} />
-      </div>
-      <input className="text-input" type="password" style={{ marginTop: 8 }} placeholder="Assignment password" value={password} onChange={(e) => setPassword(e.currentTarget.value)} />
-
-      <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)" }}>Assign patients:</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 160, overflowY: "auto" }}>
-        {summary.patients.map((p) => (
-          <label key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, cursor: "pointer" }}>
-            <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)} />
-            {p.researchId ?? p.id} · {p.cancerType ?? p.modelId ?? "—"}
-            {(p.documentCount === 0 || p.recommendationCount === 0) && (
-              <span style={{ color: "var(--warning)", fontSize: 10.5 }}>
-                (needs {p.documentCount === 0 ? "a document" : ""}{p.documentCount === 0 && p.recommendationCount === 0 ? " + " : ""}{p.recommendationCount === 0 ? "AI output" : ""})
-              </span>
-            )}
-          </label>
-        ))}
-      </div>
-
-      <button className="btn btn-success btn-sm" style={{ marginTop: 10 }} disabled={busy || !reviewerId.trim() || !password || picked.size === 0} onClick={build}>
-        {busy ? "Building…" : "Build & save encrypted .atb"}
-      </button>
-      {receipt && (
-        <div style={{ marginTop: 8, fontSize: 11, color: "var(--success)" }}>
-          Package built ({receipt.assignmentId}).
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, wordBreak: "break-all" }}>SHA-256: {receipt.sha256}</div>
-        </div>
-      )}
-      {err && <div className="form-error">{err}</div>}
-    </div>
-  );
-}
-
 function ImportResponsePanel({ onImported, resultsCount }: { onImported: () => void; resultsCount: number }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -426,7 +350,13 @@ function ResponsesTab() {
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <ImportResponsePanel onImported={load} resultsCount={view?.responseCount ?? 0} />
         <ExportAnalysisPanel />
-        <BatchesPanel batches={view?.batches ?? []} />
+        <BatchesPanel
+          batches={view?.batches ?? []}
+          onDeleteResponse={async (aid, rid) => {
+            await coordinatorIpc.deleteResponse(aid, rid);
+            load();
+          }}
+        />
       </div>
       <AggregatePanel view={view} />
     </div>
@@ -469,58 +399,166 @@ function ExportAnalysisPanel() {
   );
 }
 
-function ReviewersTab() {
+function ReviewersTab({ allPatients }: { allPatients: CoordPatient[] }) {
   const [grid, setGrid] = useState<ReviewerGrid | null>(null);
+  const load = () => coordinatorIpc.reviewers().then(setGrid).catch((e) => console.error(e));
   useEffect(() => {
-    coordinatorIpc.reviewers().then(setGrid).catch((e) => console.error(e));
+    load();
   }, []);
 
   if (!grid) return <div className="doc-empty">Loading…</div>;
-  if (grid.reviewers.length === 0)
-    return <div className="doc-empty">No reviewers yet. Build an assignment package to add reviewers.</div>;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 940 }}>
+      <AddReviewerForm onAdded={load} />
+      {grid.reviewers.length === 0 && (
+        <div className="doc-empty">No reviewers yet. Add a reviewer above, assign patients, then generate a package.</div>
+      )}
       {grid.reviewers.map((rv) => (
-        <div key={rv.reviewerId} style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-            <div>
-              <strong style={{ fontSize: 15, color: "#1e293b" }}>{rv.displayName ?? rv.reviewerId}</strong>
-              <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>{rv.reviewerId}</span>
-            </div>
-            <span style={{ fontSize: 12, color: "var(--muted)" }}>
-              {rv.assignments.length} batch{rv.assignments.length === 1 ? "" : "es"}
-            </span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {rv.assignments.map((a) => (
-              <div key={a.assignmentId} style={{ borderLeft: "3px solid var(--border-2)", paddingLeft: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                  <span style={{ fontSize: 11.5, fontFamily: "var(--font-mono)", color: "var(--muted)" }}>{a.assignmentId}</span>
-                  <span style={{ fontSize: 11, color: "var(--muted-2)" }}>· {a.createdAt.slice(0, 10)}</span>
-                  <span className={`status-chip ${a.responded ? "complete" : "not_started"}`}>
-                    {a.responded ? "Responded" : "Awaiting"}
-                  </span>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {a.patients.map((p) => (
-                    <span key={p.patientId} style={{ fontSize: 11, background: "var(--surface-2)", border: "1px solid var(--border-2)", borderRadius: 6, padding: "2px 8px", color: "var(--text-2)" }}>
-                      {p.researchId ?? p.patientId}
-                      {p.modelId && <span style={{ color: "var(--muted-2)" }}> · {p.modelId}</span>}
-                    </span>
-                  ))}
-                  {a.patients.length === 0 && <span style={{ fontSize: 11, color: "var(--muted-2)" }}>(patient list not recorded)</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <ReviewerRow key={rv.reviewerId} reviewer={rv} allPatients={allPatients} onChanged={load} />
       ))}
     </div>
   );
 }
 
-function BatchesPanel({ batches }: { batches: Batch[] }) {
+function AddReviewerForm({ onAdded }: { onAdded: () => void }) {
+  const [id, setId] = useState("");
+  const [name, setName] = useState("");
+  const add = async () => {
+    if (!id.trim()) return;
+    await coordinatorIpc.addReviewer(id.trim(), name.trim());
+    setId(""); setName("");
+    onAdded();
+  };
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14, display: "flex", gap: 8, alignItems: "center" }}>
+      <input className="text-input" style={{ maxWidth: 180 }} placeholder="Reviewer ID" value={id} onChange={(e) => setId(e.currentTarget.value)} />
+      <input className="text-input" style={{ maxWidth: 220 }} placeholder="Reviewer name (optional)" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+      <button className="btn btn-primary btn-sm" disabled={!id.trim()} onClick={add}>+ Add reviewer</button>
+    </div>
+  );
+}
+
+function ReviewerRow({
+  reviewer,
+  allPatients,
+  onChanged,
+}: {
+  reviewer: import("../services/ipc").GridReviewer;
+  allPatients: CoordPatient[];
+  onChanged: () => void;
+}) {
+  const [pw, setPw] = useState("");
+  const [showGen, setShowGen] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const assigned = new Set(reviewer.assignedPatients.map((p) => p.patientId));
+
+  const toggle = async (pid: string) => {
+    const next = new Set(assigned);
+    next.has(pid) ? next.delete(pid) : next.add(pid);
+    await coordinatorIpc.assignPatients(reviewer.reviewerId, [...next]);
+    onChanged();
+  };
+
+  const generate = async () => {
+    if (!pw || assigned.size === 0) return;
+    setErr(null); setMsg(null);
+    const destination = await saveDialog({
+      defaultPath: `TumorBoard_${reviewer.reviewerId}.atb`,
+      filters: [{ name: "AI Tumor Board Assignment", extensions: ["atb"] }],
+    });
+    if (!destination) return;
+    try {
+      const r = await coordinatorIpc.buildPackage(
+        reviewer.reviewerId,
+        reviewer.displayName ?? reviewer.reviewerId,
+        [...assigned],
+        pw,
+        destination
+      );
+      setMsg(`Package built: ${r.assignmentId} (${r.patientCount} patients).`);
+      setPw(""); setShowGen(false);
+      onChanged();
+    } catch (e) {
+      setErr(String(e).replace(/^.*failed validation: /, "Validation failed: "));
+    }
+  };
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+        <div>
+          <strong style={{ fontSize: 15, color: "#1e293b" }}>{reviewer.displayName ?? reviewer.reviewerId}</strong>
+          <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>{reviewer.reviewerId}</span>
+        </div>
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => {
+            if (window.confirm(`Delete reviewer ${reviewer.reviewerId} and all their batches/responses? This cannot be undone.`)) {
+              coordinatorIpc.deleteReviewer(reviewer.reviewerId).then(onChanged);
+            }
+          }}
+        >
+          Delete reviewer
+        </button>
+      </div>
+
+      {/* Assign patients */}
+      <div className="field-label">Assign patients / models ({assigned.size})</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+        {allPatients.map((p) => {
+          const on = assigned.has(p.id);
+          const notReady = p.documentCount === 0 || p.recommendationCount === 0;
+          return (
+            <button
+              key={p.id}
+              className={`btn btn-sm ${on ? "btn-primary" : "btn-ghost"}`}
+              title={notReady ? "Missing a document or AI output" : ""}
+              onClick={() => toggle(p.id)}
+            >
+              {p.researchId ?? p.id} · {p.cancerType ?? p.modelId ?? "—"}
+              {notReady && <span style={{ color: on ? "#fde68a" : "var(--warning)", marginLeft: 4 }}>⚠</span>}
+            </button>
+          );
+        })}
+        {allPatients.length === 0 && <span style={{ fontSize: 12, color: "var(--muted-2)" }}>No patients in the study yet.</span>}
+      </div>
+
+      {/* Generate package */}
+      {showGen ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input className="text-input" type="password" style={{ maxWidth: 220 }} placeholder="Assignment password" value={pw} onChange={(e) => setPw(e.currentTarget.value)} />
+          <button className="btn btn-success btn-sm" disabled={!pw || assigned.size === 0} onClick={generate}>Build &amp; save .atb</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setShowGen(false); setPw(""); }}>Cancel</button>
+        </div>
+      ) : (
+        <button className="btn btn-success btn-sm" disabled={assigned.size === 0} onClick={() => setShowGen(true)}>
+          Generate package for this reviewer…
+        </button>
+      )}
+      {msg && <div style={{ color: "var(--success)", fontSize: 12, marginTop: 8 }}>{msg}</div>}
+      {err && <div className="form-error">{err}</div>}
+
+      {/* Batches already sent */}
+      {reviewer.assignments.length > 0 && (
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div className="field-label">Batches sent ({reviewer.assignments.length})</div>
+          {reviewer.assignments.map((a) => (
+            <div key={a.assignmentId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}>
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--muted)" }}>{a.assignmentId.slice(0, 16)}…</span>
+              <span style={{ color: "var(--muted-2)" }}>{a.createdAt.slice(0, 10)}</span>
+              <span style={{ color: "var(--text-2)" }}>{a.patients.map((p) => p.researchId ?? p.patientId).join(", ")}</span>
+              <span className={`status-chip ${a.responded ? "complete" : "not_started"}`}>{a.responded ? "Responded" : "Awaiting"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BatchesPanel({ batches, onDeleteResponse }: { batches: Batch[]; onDeleteResponse: (assignmentId: string, reviewerId: string) => void }) {
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
       <SectionTitle>Sent batches ({batches.length})</SectionTitle>
@@ -541,6 +579,19 @@ function BatchesPanel({ batches }: { batches: Batch[] }) {
               <span className={`status-chip ${b.responded ? "complete" : "not_started"}`}>
                 {b.responded ? "Responded" : "Awaiting"}
               </span>
+              {b.responded && (
+                <button
+                  className="nb-remove-btn"
+                  title="Delete this uploaded response"
+                  onClick={() => {
+                    if (window.confirm(`Delete the uploaded response from ${b.reviewerId}? The aggregate will update. This cannot be undone.`)) {
+                      onDeleteResponse(b.assignmentId, b.reviewerId);
+                    }
+                  }}
+                >
+                  ✕
+                </button>
+              )}
             </div>
           ))}
         </div>

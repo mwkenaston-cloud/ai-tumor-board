@@ -77,6 +77,7 @@ interface AppActions {
   undoInsert: (patientId: string, recommendationId: string) => void;
   undoDismiss: (patientId: string, recommendationId: string) => void;
   removeBlock: (patientId: string, blockId: string) => void;
+  logEvent: (patientId: string | null, eventType: string, payload?: Record<string, unknown>) => void;
   completePatient: (patientId: string) => void;
   submitPatientSurvey: (patientId: string, answers: Record<string, string>) => void;
   startCompletion: () => void;
@@ -148,6 +149,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...patch,
       };
       ipc.saveDecision(decision).catch((e) => console.error("save_decision failed", e));
+    },
+    []
+  );
+
+  // Timestamped engagement events for trajectory analysis (Tauri only).
+  const audit = useCallback(
+    (patientId: string | null, eventType: string, payload?: Record<string, unknown>) => {
+      if (!isTauri()) return;
+      ipc.appendAudit(patientId, eventType, payload).catch((e) => console.error("append_audit failed", e));
     },
     []
   );
@@ -393,9 +403,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           similarityPercent: 100,
           decidedAt: new Date().toISOString(),
         });
+        audit(patientId, "RECOMMENDATION_INSERTED", { recommendationId });
       }
     },
-    [updatePatient, persistDecision]
+    [updatePatient, persistDecision, audit]
   );
 
   const dismissRecommendation = useCallback(
@@ -413,8 +424,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dismissalReason: reason ?? null,
         decidedAt: new Date().toISOString(),
       });
+      audit(patientId, "RECOMMENDATION_DISMISSED", { recommendationId, reason: reason ?? null });
     },
-    [updatePatient, persistDecision]
+    [updatePatient, persistDecision, audit]
   );
 
   // Undo an insertion: remove the AI block(s) for this rec and reset to pending.
@@ -434,8 +446,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         finalText: null,
         decidedAt: null,
       });
+      audit(patientId, "RECOMMENDATION_REMOVED", { recommendationId });
     },
-    [updatePatient, persistDecision]
+    [updatePatient, persistDecision, audit]
   );
 
   // Undo a dismissal: reset the decision back to pending.
@@ -450,8 +463,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         dismissalReason: null,
         decidedAt: null,
       });
+      audit(patientId, "RECOMMENDATION_UNDISMISSED", { recommendationId });
     },
-    [updatePatient, persistDecision]
+    [updatePatient, persistDecision, audit]
   );
 
   const removeBlock = useCallback(
@@ -564,6 +578,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       undoInsert,
       undoDismiss,
       removeBlock,
+      logEvent: audit,
       completePatient,
       submitPatientSurvey,
       startCompletion,
@@ -586,6 +601,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       undoInsert,
       undoDismiss,
       removeBlock,
+      audit,
       completePatient,
       submitPatientSurvey,
       startCompletion,

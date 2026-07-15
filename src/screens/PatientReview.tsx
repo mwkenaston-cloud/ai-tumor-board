@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../app/AppContext";
 import PatientContextView from "../components/PatientContextView";
 import FramingView from "../components/FramingView";
@@ -18,6 +18,29 @@ const TABS: { id: Tab; label: string }[] = [
 export default function PatientReview() {
   const { currentPatient, assignment, actions } = useApp();
   const [tab, setTab] = useState<Tab>("patient");
+
+  // Tab dwell-time tracking for engagement trajectories.
+  const tabEnteredAt = useRef(Date.now());
+  const currentTab = useRef<Tab>("patient");
+  const pid = currentPatient?.id ?? null;
+
+  const changeTab = (next: Tab) => {
+    const seconds = Math.round((Date.now() - tabEnteredAt.current) / 1000);
+    actions.logEvent(pid, "TAB_VIEWED", { tab: currentTab.current, seconds, next });
+    tabEnteredAt.current = Date.now();
+    currentTab.current = next;
+    setTab(next);
+  };
+
+  // On leaving the review, record time spent on the final tab.
+  useEffect(() => {
+    return () => {
+      const seconds = Math.round((Date.now() - tabEnteredAt.current) / 1000);
+      actions.logEvent(pid, "TAB_VIEWED", { tab: currentTab.current, seconds, next: null });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pid]);
+
   if (!currentPatient || !assignment) return null;
   const p = currentPatient;
   // Guard against a study with no settings (e.g., an older package): default to
@@ -65,7 +88,7 @@ export default function PatientReview() {
           <button
             key={t.id}
             className={`btn btn-sm ${tab === t.id ? "btn-primary" : "btn-ghost"}`}
-            onClick={() => setTab(t.id)}
+            onClick={() => changeTab(t.id)}
           >
             {t.label}
           </button>
