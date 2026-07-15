@@ -134,7 +134,9 @@ export interface TimelineEvent {
 export interface PatientContext {
   patient_profile?: string;
   timeline?: TimelineEvent[];
-  comorbidities?: Array<Record<string, unknown>>;
+  /** v1.2: rich object (CCI + treatment-relevant flags + summary);
+   *  v1.0: array of {condition, status, details, source_quote}. */
+  comorbidities?: unknown;
   family_history?: Record<string, unknown>;
 }
 

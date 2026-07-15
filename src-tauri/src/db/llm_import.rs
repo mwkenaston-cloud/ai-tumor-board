@@ -164,6 +164,7 @@ pub fn validate_and_normalize(patient_id: &str, raw_json: &str) -> Result<Normal
             "epistemic_uncertainty": unc.0,
             "patient_specific_uncertainty": unc.1,
             "condensed_note": condensed,
+            "comorbidity_flags_referenced": rec.get("comorbidity_flags_referenced"),
         });
 
         recommendations.push(Recommendation {
@@ -301,6 +302,33 @@ mod tests {
     #[test]
     fn rejects_bad_json() {
         assert!(matches!(validate_and_normalize("PT-1", "{nope"), Err(LlmError::Json(_))));
+    }
+
+    #[test]
+    fn accepts_v12_object_comorbidities_and_flags() {
+        let raw = r#"{
+          "session_metadata": {"model":"gpt","prompt_version":"1.2","cancer_type":"Prostate","clinical_question":"Q"},
+          "patient_comorbidities": {
+            "comorbidity_summary": {
+              "cci_score_overview": {"unadjusted_score":2,"age_adjusted_score":4,"estimated_10yr_survival_pct":53,"interpretation":"moderate burden"},
+              "active_treatment_relevant_flags": [{"category":"Heart Failure","clinical_detail":"LVEF 35%","treatment_implication":"avoid anthracyclines"}],
+              "overall_burden_narrative":"substantial multi-organ burden"
+            },
+            "charlson_comorbidity_index": {"unadjusted_score":2,"contributing_conditions":[]},
+            "treatment_relevant_flags": [{"category":"Heart Failure","status":"present","severity_or_stage":"HFrEF","treatment_implication":"avoid anthracyclines"}],
+            "other_comorbidities": []
+          },
+          "phase3_recommendations": [{"recommendation_id":1,"recommendation_text":"txt","comorbidity_flags_referenced":["Heart Failure"]}]
+        }"#;
+        let n = validate_and_normalize("PT-1", raw).unwrap();
+        // Phase-1 context carries the rich comorbidity object.
+        assert!(n.context.get("comorbidities").and_then(|c| c.get("comorbidity_summary")).is_some());
+        // The rec metadata carries the referenced flags.
+        let meta = n.recommendations[0].metadata.as_ref().unwrap();
+        assert_eq!(
+            meta.get("comorbidity_flags_referenced").and_then(|v| v.as_array()).map(|a| a.len()),
+            Some(1)
+        );
     }
 
     #[test]

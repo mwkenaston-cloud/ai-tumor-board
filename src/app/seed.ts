@@ -25,7 +25,26 @@ const patientA: Patient = {
   clinicalQuestion:
     "72yo with resected stage III colon adenocarcinoma (pT3N1). What adjuvant systemic therapy is most appropriate?",
   cancerType: "Stage III colon adenocarcinoma",
-  context: null,
+  context: {
+    patient_profile: "72yo male, ECOG 0, resected pT3N1 colon adenocarcinoma.",
+    timeline: [{ date: "2026-01-10", event_type: "Surgery", finding: "Right hemicolectomy", source_quote: "s/p resection" }],
+    comorbidities: {
+      comorbidity_summary: {
+        cci_score_overview: { unadjusted_score: 2, age_adjusted_score: 5, estimated_10yr_survival_pct: 21, interpretation: "Moderate–high burden; age adjustment substantially lowers survival estimate." },
+        active_treatment_relevant_flags: [{ category: "Chronic Kidney Disease", clinical_detail: "eGFR 42 (stage 3b)", treatment_implication: "Reduce/avoid full-dose platinum; renally dose-adjust and monitor creatinine." }],
+        primary_score_drivers: [{ condition: "Moderate CKD", cci_weight: 2, weighting_rationale: "eGFR-based staging." }],
+        confidence_and_data_gaps: { suspected_but_undocumented: "Possible CHF not confirmed.", missing_data_points: "No recent LVEF on file." },
+        overall_burden_narrative: "Substantial, primarily renal comorbidity that constrains platinum dosing; cardiac status uncertain.",
+      },
+      charlson_comorbidity_index: { unadjusted_score: 2, age_adjusted_score: 5, estimated_10yr_survival_pct: 21, contributing_conditions: [] },
+      treatment_relevant_flags: [
+        { category: "Chronic Kidney Disease", status: "present", severity_or_stage: "Stage 3b", treatment_implication: "Renal dose adjustment.", source_quote: "eGFR 42" },
+        { category: "Heart Failure", status: "not_documented", severity_or_stage: "", treatment_implication: "", source_quote: "" },
+      ],
+      other_comorbidities: [{ condition: "Hyperlipidemia", status: "Active", details: "On statin", source_quote: "rosuvastatin" }],
+    } as unknown,
+    family_history: { family_history_of_cancer: [{ relative: "Father", cancer_type: "Colon", age_at_diagnosis: "68", source_quote: "father colon ca" }] },
+  },
   framing: null,
   position: 0,
   status: "not_started",

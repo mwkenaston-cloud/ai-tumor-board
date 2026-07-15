@@ -16,7 +16,7 @@
       }
     },
     "phase1_patient_summary": { "type": ["object", "null"] },
-    "patient_comorbidities": { "type": ["array", "null"] },
+    "patient_comorbidities": { "type": ["object", "array", "null"] },
     "patient_family_history": { "type": ["object", "null"] },
     "phase2_question_framing": { "type": ["object", "null"] },
     "phase3_temperature_level_selection": { "type": ["object", "null"] },
@@ -35,6 +35,7 @@
           "evidence_tier": { "type": ["string", "null"] },
           "risk_score": { "type": ["number", "null"], "minimum": 0, "maximum": 5 },
           "safety_score_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+          "comorbidity_flags_referenced": { "type": ["array", "null"] },
           "contraindications_noted": { "type": ["array", "null"] },
           "monitoring_requirements": { "type": ["array", "null"] }
         }
@@ -50,6 +51,7 @@
           "drug_interactions": { "type": ["array", "null"] },
           "contraindication_classification": { "type": ["object", "null"] },
           "adverse_event_profile": { "type": ["array", "null"] },
+          "comorbidity_flags_referenced": { "type": ["array", "null"] },
           "monitoring_plan": { "type": ["string", "null"] },
           "safety_score_final_pct": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
           "safety_score_rationale": { "type": ["string", "null"] }

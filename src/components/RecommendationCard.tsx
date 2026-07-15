@@ -135,6 +135,14 @@ export default function RecommendationCard({
 
       <div className="rec-text">{rec.text}</div>
 
+      {Array.isArray(rec.metadata?.comorbidity_flags_referenced) &&
+        (rec.metadata!.comorbidity_flags_referenced as unknown[]).length > 0 && (
+          <div style={{ fontSize: 11, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "4px 8px", marginBottom: 8 }}>
+            ⚠ Comorbidity flags:{" "}
+            {(rec.metadata!.comorbidity_flags_referenced as unknown[]).map(String).join(", ")}
+          </div>
+        )}
+
       {settings.showDetails && (rec.fullText || rec.rationale || monitoring) && (
         <>
           <button className="rec-detail-toggle" onClick={() => setOpen((o) => !o)}>
