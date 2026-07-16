@@ -9,6 +9,12 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# The default GITHUB_TOKEN is read-only, which makes the release-creation step
+# fail with "Resource not accessible by integration". Creating the draft release
+# and uploading installers needs contents: write.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -23,12 +29,12 @@ jobs:
             rust_targets: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
