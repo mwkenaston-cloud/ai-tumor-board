@@ -43,17 +43,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Signing is enabled by a separate job/step once certs exist — see
+      # docs/BUILD.md. This default build is unsigned (ad-hoc), so do NOT pass any
+      # APPLE_* env vars: an empty APPLE_CERTIFICATE makes the bundler attempt a
+      # keychain import and fail. To sign later, add the Apple secrets and the
+      # matching env block back here.
       - name: Build & release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing + notarization (optional; unset = unsigned build).
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: "AI Tumor Board __VERSION__"

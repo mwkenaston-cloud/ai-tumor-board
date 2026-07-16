@@ -5,6 +5,8 @@ mod db;
 
 use std::sync::Mutex;
 
+// Emitter/Manager are only used in the macOS file-open handler below.
+#[cfg(target_os = "macos")]
 use tauri::{Emitter, Manager};
 
 use commands::coordinator::{self, CoordinatorState};
@@ -86,18 +88,20 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            // macOS delivers file-association opens as an Apple event, not argv.
-            if let tauri::RunEvent::Opened { urls } = event {
+        .run(|_app, _event| {
+            // macOS delivers file-association opens as an Apple event (not argv).
+            // `RunEvent::Opened` only exists on macOS, so gate the whole handler.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = _event {
                 for url in urls {
                     if let Ok(p) = url.to_file_path() {
                         let path = p.to_string_lossy().to_string();
                         if is_assignment(&path) {
-                            if let Some(state) = app.try_state::<PendingOpen>() {
+                            if let Some(state) = _app.try_state::<PendingOpen>() {
                                 *state.lock().unwrap() = Some(path.clone());
                             }
                             // If the window is already up, tell the UI to open it.
-                            let _ = app.emit("open-assignment-file", path);
+                            let _ = _app.emit("open-assignment-file", path);
                         }
                     }
                 }
