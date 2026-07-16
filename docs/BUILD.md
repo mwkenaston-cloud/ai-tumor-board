@@ -58,25 +58,26 @@ Artifacts land in `src-tauri/target/release/bundle/`:
 
 ## Signing & notarization (required for real distribution)
 
-Unsigned builds trigger Gatekeeper (macOS) and SmartScreen (Windows) warnings and
-may be blocked. Before distributing to physicians:
+**See `SIGNING.md`** for the full procedure: obtaining the certificates, the exact
+GitHub secrets to set, and how to verify a signed build.
 
-**macOS** — sign with a Developer ID cert and notarize. Set env vars, then build:
+Short version: physicians install these themselves, so unsigned builds are
+*blocked* (not just warned about) by macOS Gatekeeper and Windows SmartScreen.
+CI signs automatically once the secrets exist and produces unsigned builds until
+then — no workflow changes needed when the certs arrive.
+
+To sign a **local** macOS build once you have a Developer ID cert in your keychain:
 
 ```bash
 export APPLE_SIGNING_IDENTITY="Developer ID Application: <Name> (<TEAMID>)"
 export APPLE_ID="<apple-id-email>"
-export APPLE_PASSWORD="<app-specific-password>"
+export APPLE_PASSWORD="<app-specific-password>"   # app-specific, not your Apple ID password
 export APPLE_TEAM_ID="<TEAMID>"
 npm run tauri build -- --target universal-apple-darwin
 ```
 
-Tauri signs and (with the Apple credentials present) notarizes the bundle. See
-Tauri's macOS distribution docs.
-
-**Windows** — sign the `.exe`/`.msi` with an code-signing certificate (configure
-`bundle.windows.certificateThumbprint` in `tauri.conf.json`, or sign the outputs
-with `signtool`). EV certs get SmartScreen reputation fastest.
+Tauri signs with the hardened runtime and, with the Apple credentials present,
+notarizes and staples the bundle.
 
 For institutional rollout, prefer managed software deployment (Jamf / Intune /
 SCCM) over emailing installers.
@@ -91,10 +92,8 @@ included CI workflow, which builds both on GitHub's runners:
    git remote add origin <your-repo-url>
    git push -u origin main
    ```
-2. (Optional, for signed macOS builds) add repo **Secrets** →
-   `APPLE_SIGNING_IDENTITY`, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-   `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`. Without them the macOS build is
-   unsigned.
+2. Add the signing **Secrets** (`SIGNING.md`). Without them both builds are
+   unsigned, which is fine for internal testing but not for distribution.
 3. Tag a release and push it:
    ```bash
    git tag v0.9.0 && git push origin v0.9.0

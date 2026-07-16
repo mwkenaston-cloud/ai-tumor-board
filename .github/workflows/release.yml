@@ -1,8 +1,13 @@
 name: Release
 
-# Build signed-capable macOS + Windows installers. Triggers on a version tag
-# (e.g. `git tag v0.9.0 && git push origin v0.9.0`) or manually from the Actions
+# Build macOS + Windows installers. Triggers on a version tag
+# (e.g. `git tag v0.9.1 && git push origin v0.9.1`) or manually from the Actions
 # tab. Produces a DRAFT GitHub release with both platforms' installers attached.
+#
+# SIGNING: this workflow signs automatically once the relevant repo secrets are
+# present, and produces unsigned builds until then. See docs/SIGNING.md for how
+# to obtain the certificates and which secrets to set. Nothing here needs to
+# change when the certs arrive — just add the secrets and re-tag.
 
 on:
   push:
@@ -28,6 +33,16 @@ jobs:
             args: ""
             rust_targets: ""
     runs-on: ${{ matrix.platform }}
+
+    # The `secrets` context is not available in a step-level `if`, so map secret
+    # presence to env here, where it is. Note that an EMPTY signing var is worse
+    # than an absent one: the bundler sees the key, tries to sign, and fails —
+    # that is exactly what broke the v0.9.0 build. Hence separate signed/unsigned
+    # steps rather than one step with conditionally-empty env.
+    env:
+      SIGN_MAC: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
+      SIGN_WIN: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CERT_PROFILE_NAME != '' }}
+
     steps:
       - uses: actions/checkout@v5
 
@@ -49,12 +64,64 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # Signing is enabled by a separate job/step once certs exist — see
-      # docs/BUILD.md. This default build is unsigned (ad-hoc), so do NOT pass any
-      # APPLE_* env vars: an empty APPLE_CERTIFICATE makes the bundler attempt a
-      # keychain import and fail. To sign later, add the Apple secrets and the
-      # matching env block back here.
-      - name: Build & release
+      # Azure Trusted Signing keeps the private key in Azure's HSM; this CLI is
+      # what tauri.windows-signed.conf.json shells out to per artifact.
+      - name: Install Windows signing tool
+        if: runner.os == 'Windows' && env.SIGN_WIN == 'true'
+        run: cargo install trusted-signing-cli --locked
+
+      # ---------------------------------------------------------------------
+      # Build & release. Exactly one of the three steps below runs per platform.
+      # ---------------------------------------------------------------------
+
+      - name: Build & release (macOS — signed + notarized)
+        if: runner.os == 'macOS' && env.SIGN_MAC == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Imported into a temporary keychain by tauri-action, then signed with
+          # hardened runtime (required for notarization).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # Presence of these three triggers notarization + stapling.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: "AI Tumor Board __VERSION__"
+          releaseBody: "Automated build. See docs/RELEASE_CHECKLIST.md before distributing."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
+
+      - name: Build & release (Windows — signed)
+        if: runner.os == 'Windows' && env.SIGN_WIN == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Read by trusted-signing-cli via the signCommand in the config below.
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_CODE_SIGNING_NAME: ${{ secrets.AZURE_CODE_SIGNING_NAME }}
+          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: "AI Tumor Board __VERSION__"
+          releaseBody: "Automated build. See docs/RELEASE_CHECKLIST.md before distributing."
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false
+          args: --config src-tauri/tauri.windows-signed.conf.json
+
+      - name: Build & release (unsigned — no certs configured)
+        if: >-
+          (runner.os == 'macOS' && env.SIGN_MAC != 'true') ||
+          (runner.os == 'Windows' && env.SIGN_WIN != 'true')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,3 +133,14 @@ jobs:
           prerelease: false
           includeUpdaterJson: false
           args: ${{ matrix.args }}
+
+      # A signed build that silently didn't sign is the dangerous outcome: it
+      # looks fine in CI and fails on the physician's machine. Verify instead.
+      - name: Verify macOS signature + notarization
+        if: runner.os == 'macOS' && env.SIGN_MAC == 'true'
+        run: |
+          APP=$(find src-tauri/target -name "AI Tumor Board.app" -maxdepth 5 | head -1)
+          echo "Verifying $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          # Rejects if the notarization ticket is missing or not stapled.
+          spctl --assess --type execute --verbose=2 "$APP"
