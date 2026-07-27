@@ -417,7 +417,11 @@ function ExportAnalysisPanel() {
     if (!destination) return;
     try {
       const r = await coordinatorIpc.exportAnalysis(destination);
-      setMsg(`Exported ${r.recordCount} records. JSON + CSV written next to each other.`);
+      setMsg(
+        `Exported ${r.recordCount} recommendation rows, ${r.surveyCount} survey answers, and ` +
+          `${r.eventCount} engagement events. Four files written next to each other: ` +
+          `the lossless JSON, the main CSV, plus _surveys.csv and _events.csv.`
+      );
     } catch (e) {
       setErr("Could not export analysis.");
       console.error(e);
@@ -428,11 +432,13 @@ function ExportAnalysisPanel() {
     <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14 }}>
       <SectionTitle>Analysis export</SectionTitle>
       <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 10px" }}>
-        Pooled, analysis-ready export across all imported responses — a lossless JSON and a flat CSV
-        (one row per reviewer × patient × recommendation) with timing, note text, original AI text,
-        accept/dismiss/alter flags, edit distance/similarity, and authorship breakdown.
+        Pooled, analysis-ready export across all imported responses. Writes four files: a lossless
+        JSON archive; a main CSV (one row per reviewer × patient × recommendation) with reviewer name
+        + specialty, timing, note text, original AI text, accept/dismiss/alter flags, edit
+        distance/similarity, and authorship breakdown; a <code>_surveys.csv</code> (one row per
+        survey answer); and an <code>_events.csv</code> engagement timeline.
       </p>
-      <button className="btn btn-primary btn-sm" onClick={exportAnalysis}>Export analysis (JSON + CSV)…</button>
+      <button className="btn btn-primary btn-sm" onClick={exportAnalysis}>Export analysis (JSON + CSVs)…</button>
       {msg && <div style={{ color: "var(--success)", fontSize: 12, marginTop: 8 }}>{msg}</div>}
       {err && <div className="form-error">{err}</div>}
     </div>
@@ -464,16 +470,18 @@ function ReviewersTab({ allPatients }: { allPatients: CoordPatient[] }) {
 function AddReviewerForm({ onAdded }: { onAdded: () => void }) {
   const [id, setId] = useState("");
   const [name, setName] = useState("");
+  const [specialty, setSpecialty] = useState("");
   const add = async () => {
     if (!id.trim()) return;
-    await coordinatorIpc.addReviewer(id.trim(), name.trim());
-    setId(""); setName("");
+    await coordinatorIpc.addReviewer(id.trim(), name.trim(), specialty.trim() || undefined);
+    setId(""); setName(""); setSpecialty("");
     onAdded();
   };
   return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14, display: "flex", gap: 8, alignItems: "center" }}>
-      <input className="text-input" style={{ maxWidth: 180 }} placeholder="Reviewer ID" value={id} onChange={(e) => setId(e.currentTarget.value)} />
-      <input className="text-input" style={{ maxWidth: 220 }} placeholder="Reviewer name (optional)" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border-2)", borderRadius: 10, padding: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <input className="text-input" style={{ maxWidth: 160 }} placeholder="Reviewer ID" value={id} onChange={(e) => setId(e.currentTarget.value)} />
+      <input className="text-input" style={{ maxWidth: 200 }} placeholder="Reviewer name (optional)" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+      <input className="text-input" style={{ maxWidth: 200 }} placeholder="Specialty (e.g. Med Onc)" value={specialty} onChange={(e) => setSpecialty(e.currentTarget.value)} />
       <button className="btn btn-primary btn-sm" disabled={!id.trim()} onClick={add}>+ Add reviewer</button>
     </div>
   );
@@ -531,6 +539,9 @@ function ReviewerRow({
         <div>
           <strong style={{ fontSize: 15, color: "#1e293b" }}>{reviewer.displayName ?? reviewer.reviewerId}</strong>
           <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 8 }}>{reviewer.reviewerId}</span>
+          {reviewer.specialty && (
+            <span style={{ fontSize: 12, color: "var(--muted-2)", marginLeft: 8 }}>· {reviewer.specialty}</span>
+          )}
         </div>
         <button
           className="btn btn-ghost btn-sm"

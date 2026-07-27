@@ -99,6 +99,9 @@ pub fn open(path: &Path, password: &str) -> Result<Connection, ContainerError> {
     // Page-1 keying above catches a wrong password; this catches tampering or
     // corruption anywhere else in the file before we trust any content.
     dbc::verify_integrity(&conn)?;
+    // Additively upgrade files created by an older schema (e.g. add newer
+    // columns) so they keep opening in this build.
+    dbc::apply_pending_upgrades(&conn)?;
     Ok(conn)
 }
 

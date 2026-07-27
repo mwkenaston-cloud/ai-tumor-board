@@ -279,3 +279,73 @@ body {
 .save-indicator.saving { color: var(--warning); }
 .save-indicator.saved { color: var(--success); }
 .save-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+/* ── Physician tutorial ─────────────────────────────────────────────────── */
+.tut-overlay {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.tut-modal {
+  position: relative;
+  width: 100%; max-width: 560px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.28);
+  padding: 24px 24px 18px;
+}
+.tut-x {
+  position: absolute; top: 12px; right: 12px;
+  border: none; background: transparent; cursor: pointer;
+  color: var(--muted-2); font-size: 15px; line-height: 1;
+  padding: 4px 6px; border-radius: 6px;
+}
+.tut-x:hover { background: var(--surface-3); color: var(--text-2); }
+.tut-head { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 12px; padding-right: 24px; }
+.tut-icon {
+  font-size: 26px; line-height: 1;
+  background: var(--surface-3); border-radius: 12px;
+  width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.tut-step-count { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-2); }
+.tut-title { margin: 2px 0 0; font-size: 19px; color: var(--text); }
+.tut-body { font-size: 14px; color: var(--text-2); line-height: 1.55; min-height: 176px; }
+.tut-body p { margin: 0 0 10px; }
+.tut-body .tut-muted { color: var(--muted); font-size: 13px; }
+.tut-list { margin: 4px 0 10px; padding-left: 20px; }
+.tut-list li { margin-bottom: 5px; }
+
+/* Illustrative art */
+.tut-art { margin-top: 12px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--surface-2); padding: 10px; }
+.tut-tabbar { display: flex; gap: 6px; }
+.tut-tab {
+  flex: 1; text-align: center; font-size: 10.5px; padding: 7px 4px; border-radius: 7px;
+  background: var(--surface-3); color: var(--muted); border: 1px solid transparent;
+}
+.tut-tab.on { background: var(--primary); color: #fff; border-color: var(--primary-hover); }
+.tut-queue { display: flex; flex-direction: column; gap: 6px; }
+.tut-qrow { display: grid; grid-template-columns: 60px 1fr auto; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-2); padding: 7px 9px; border-radius: 7px; background: var(--surface); border: 1px solid var(--border-2); }
+.tut-qrow.on { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
+.tut-qid { font-weight: 600; color: var(--text); }
+.tut-chip { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--muted); }
+.tut-chip.done { background: #d1fae5; color: #047857; }
+.tut-chip.prog { background: #dbeafe; color: #1d4ed8; }
+.tut-rec { display: flex; flex-direction: column; gap: 8px; }
+.tut-rec-head { display: flex; justify-content: space-between; align-items: center; }
+.tut-badge { font-size: 11px; font-weight: 600; color: #fff; background: var(--primary); padding: 3px 9px; border-radius: 999px; }
+.tut-scores { display: flex; gap: 6px; }
+.tut-scores span { font-size: 10px; padding: 3px 7px; border-radius: 6px; background: var(--surface-3); color: var(--muted); border: 1px dashed var(--border-2); }
+.tut-rec-text { font-size: 12.5px; color: var(--text-2); }
+.tut-rec-actions { display: flex; gap: 8px; }
+.tut-btn { font-size: 11.5px; padding: 4px 12px; border-radius: 7px; }
+.tut-btn.ins { background: var(--success); color: #fff; }
+.tut-btn.dis { background: var(--surface-3); color: var(--muted); border: 1px solid var(--border-2); }
+
+.tut-dots { display: flex; gap: 6px; justify-content: center; margin: 16px 0 12px; }
+.tut-dot { width: 8px; height: 8px; border-radius: 999px; border: none; padding: 0; cursor: pointer; background: var(--border-2); }
+.tut-dot.on { background: var(--primary); width: 20px; }
+.tut-footer { display: flex; justify-content: space-between; align-items: center; }

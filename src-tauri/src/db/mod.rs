@@ -18,4 +18,4 @@ pub mod seed;
 #[cfg(test)]
 mod integration_tests;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;

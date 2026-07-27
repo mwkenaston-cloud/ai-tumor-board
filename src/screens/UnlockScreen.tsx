@@ -61,6 +61,14 @@ export default function UnlockScreen() {
   return (
     <div className="center-screen">
       <div className="card" style={{ maxWidth: 440 }}>
+        <button
+          className="rec-detail-toggle"
+          style={{ color: "var(--muted-2)", marginBottom: 4 }}
+          disabled={busy}
+          onClick={() => actions.goHome()}
+        >
+          ← Choose physician or coordinator mode
+        </button>
         <div style={{ fontSize: 34, textAlign: "center" }}>🔒</div>
         <h2 style={{ textAlign: "center" }}>Open assignment</h2>
         <p style={{ textAlign: "center" }}>

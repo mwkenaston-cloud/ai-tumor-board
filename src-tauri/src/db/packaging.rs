@@ -152,17 +152,17 @@ fn copy_study(source: &Connection, dest: &Connection) -> Result<(), PackageError
 }
 
 fn copy_reviewer(source: &Connection, dest: &Connection, reviewer_id: &str) -> Result<(), PackageError> {
-    let (name, role): (Option<String>, Option<String>) = source
+    let (name, specialty, role): (Option<String>, Option<String>, Option<String>) = source
         .query_row(
-            "SELECT display_name, role FROM reviewers WHERE reviewer_id = ?1",
+            "SELECT display_name, specialty, role FROM reviewers WHERE reviewer_id = ?1",
             [reviewer_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(DbError::from)?;
     dest.execute(
-        "INSERT OR REPLACE INTO reviewers(reviewer_id, display_name, role, assignment_status)
-         VALUES (?1,?2,?3,'ready')",
-        params![reviewer_id, name, role.unwrap_or_else(|| "reviewer".into())],
+        "INSERT OR REPLACE INTO reviewers(reviewer_id, display_name, specialty, role, assignment_status)
+         VALUES (?1,?2,?3,?4,'ready')",
+        params![reviewer_id, name, specialty, role.unwrap_or_else(|| "reviewer".into())],
     )
     .map_err(DbError::from)?;
     Ok(())

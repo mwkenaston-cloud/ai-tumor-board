@@ -1,10 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../app/AppContext";
 import type { PatientSummary } from "../models/types";
+import Tutorial, { tutorialAlreadySeen } from "../components/Tutorial";
 
 export default function PhysicianLobby() {
   const { assignment, actions } = useApp();
   const [confirming, setConfirming] = useState<PatientSummary | null>(null);
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  // Show the walkthrough automatically the first time a reviewer lands here.
+  useEffect(() => {
+    if (!tutorialAlreadySeen()) setShowTutorial(true);
+  }, []);
+
   if (!assignment) return null;
 
   const done = assignment.patients.filter((p) => p.status === "complete").length;
@@ -36,6 +44,7 @@ export default function PhysicianLobby() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", marginBottom: 8 }}>
           <h2 style={{ margin: 0, color: "#1e293b" }}>{assignment.studyTitle}</h2>
           <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShowTutorial(true)}>? How to use</button>
             <button className="btn btn-ghost btn-sm" onClick={resetSession}>↺ Reset session</button>
             <button className="btn btn-ghost btn-sm" onClick={actions.goHome}>← Home</button>
           </div>
@@ -91,6 +100,8 @@ export default function PhysicianLobby() {
           </button>
         </div>
       </div>
+
+      {showTutorial && <Tutorial onClose={() => setShowTutorial(false)} />}
 
       {confirming && (
         <div

@@ -137,6 +137,26 @@ pub fn initialize_schema(conn: &Connection) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Bring an already-existing file up to the current schema. New columns are
+/// added additively so files created by an older build keep opening. Each step
+/// is idempotent: a "duplicate column" error means the upgrade already ran and
+/// is ignored; anything else propagates.
+pub fn apply_pending_upgrades(conn: &Connection) -> Result<(), DbError> {
+    let additive = ["ALTER TABLE reviewers ADD COLUMN specialty TEXT"];
+    for stmt in additive {
+        match conn.execute(stmt, []) {
+            Ok(_) => {}
+            Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("duplicate column") => {}
+            Err(e) => return Err(DbError::from(e)),
+        }
+    }
+    conn.execute(
+        "INSERT OR REPLACE INTO app_metadata(key, value) VALUES ('schema_version', ?1)",
+        [SCHEMA_VERSION.to_string()],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

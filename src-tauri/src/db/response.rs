@@ -98,6 +98,9 @@ pub struct PatientResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ImportedResponse {
     pub header: ResponseHeader,
+    /// Reviewer identity for analysis (id + human name + clinical specialty).
+    pub reviewer_name: Option<String>,
+    pub reviewer_specialty: Option<String>,
     pub patients: Vec<PatientResponse>,
     pub surveys: serde_json::Value,
     pub audit_count: i64,
@@ -118,6 +121,11 @@ pub fn build_response(
     coordinator_public: &[u8; 32],
 ) -> Result<ResponseReceipt, ResponseError> {
     let reviewer_id = repo::first_reviewer_id(session)?;
+    // Bring each accepted recommendation's decision row into agreement with the
+    // reviewer's final edited note before we freeze it into the response, so the
+    // per-recommendation columns (status, edit_distance, similarity, final_text)
+    // reflect edits made after insertion — not just the insert-time snapshot.
+    reconcile_decisions_from_blocks(session, &reviewer_id)?;
     let source_sha = sha256_file(session_path)?;
 
     // Random data-encryption key for this response.
@@ -193,6 +201,13 @@ pub fn import_response(
 
 fn read_payload(conn: &Connection, header: &ResponseHeader) -> Result<ImportedResponse, ResponseError> {
     let reviewer_id = &header.reviewer_id;
+    let (reviewer_name, reviewer_specialty): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT display_name, specialty FROM reviewers WHERE reviewer_id = ?1",
+            [reviewer_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((None, None));
     let asg = repo::load_assignment(conn, reviewer_id)?;
 
     let mut patients = Vec::new();
@@ -250,6 +265,8 @@ fn read_payload(conn: &Connection, header: &ResponseHeader) -> Result<ImportedRe
 
     Ok(ImportedResponse {
         header: header.clone(),
+        reviewer_name,
+        reviewer_specialty,
         patients,
         surveys: serde_json::Value::Array(surveys),
         audit_count,
@@ -300,6 +317,50 @@ fn ensure_results_tables(conn: &Connection) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Recompute accepted-recommendation decisions from the reviewer's final note
+/// blocks. For every AI block still present in the note, the matching decision
+/// is set to `used` (verbatim) or `used-and-edited` (changed), with a fresh
+/// edit distance, similarity, and final text. Dismissed and untouched
+/// recommendations are left as they are.
+fn reconcile_decisions_from_blocks(conn: &Connection, reviewer_id: &str) -> Result<(), ResponseError> {
+    // (recommendation_id, original_text, current_text) for this reviewer's AI blocks.
+    let mut stmt = conn.prepare(
+        "SELECT recommendation_id, COALESCE(original_text, ''), current_text
+         FROM note_blocks
+         WHERE reviewer_id = ?1 AND block_type = 'ai' AND recommendation_id IS NOT NULL",
+    )?;
+    let blocks: Vec<(String, String, String)> = stmt
+        .query_map([reviewer_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_, _>>()?;
+
+    for (rec_id, original, current) in blocks {
+        let edited = current.trim() != original.trim();
+        let status = if edited { "used-and-edited" } else { "used" };
+        let dist = metrics::levenshtein(&original, &current) as i64;
+        let sim = metrics::similarity_percent(&original, &current);
+        // Update the existing decision if present; otherwise record one so an
+        // edited-but-never-formally-decided block still appears in the export.
+        let changed = conn.execute(
+            "UPDATE recommendation_decisions
+             SET status = ?1, edit_distance = ?2, similarity_percent = ?3, final_text = ?4
+             WHERE reviewer_id = ?5 AND recommendation_id = ?6",
+            params![status, dist, sim, current, reviewer_id, rec_id],
+        )?;
+        if changed == 0 {
+            conn.execute(
+                "INSERT INTO recommendation_decisions
+                   (decision_id, recommendation_id, reviewer_id, status, original_text, final_text, edit_distance, similarity_percent, decided_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    format!("{reviewer_id}:{rec_id}"), rec_id, reviewer_id, status,
+                    original, current, dist, sim, repo::now_iso()
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 // ── Reviewer-output copy (build side) ─────────────────────────────────────
 
 /// Copy the reviewer's slice into the response DB: study, reviewer, assignments,
@@ -323,13 +384,13 @@ fn copy_reviewer_output(
 
     // reviewer
     let rev = src.query_row(
-        "SELECT display_name, role, assignment_status FROM reviewers WHERE reviewer_id = ?1",
+        "SELECT display_name, specialty, role, assignment_status FROM reviewers WHERE reviewer_id = ?1",
         [reviewer_id],
-        |r| Ok((r.get::<_,Option<String>>(0)?, r.get::<_,Option<String>>(1)?, r.get::<_,String>(2)?)),
+        |r| Ok((r.get::<_,Option<String>>(0)?, r.get::<_,Option<String>>(1)?, r.get::<_,Option<String>>(2)?, r.get::<_,String>(3)?)),
     ).map_err(DbError::from)?;
     dst.execute(
-        "INSERT OR REPLACE INTO reviewers(reviewer_id,display_name,role,assignment_status) VALUES (?1,?2,?3,?4)",
-        params![reviewer_id, rev.0, rev.1, rev.2],
+        "INSERT OR REPLACE INTO reviewers(reviewer_id,display_name,specialty,role,assignment_status) VALUES (?1,?2,?3,?4,?5)",
+        params![reviewer_id, rev.0, rev.1, rev.2, rev.3],
     ).map_err(DbError::from)?;
 
     // assigned patient ids
@@ -567,6 +628,40 @@ mod tests {
         assert!(pt1.final_text.contains("Physician plan here."));
         assert!(pt1.attribution.char_count > 0);
         assert_eq!(pt1.decisions.len(), 1);
+    }
+
+    #[test]
+    fn editing_an_inserted_rec_reconciles_the_decision() {
+        // Seed, insert a rec verbatim (decision 'used', distance 0), then edit
+        // the AI block. The exported decision must reflect the edit.
+        let path = tempfile("assignment.atb");
+        let mut conn = container::create(&path, "pw", ContainerRole::Reviewer).unwrap();
+        seed::seed_demo(&conn, "REV-1").unwrap();
+        let p = repo::load_patient(&conn, "REV-1", "PT-1").unwrap();
+        let rec = p.recommendations[0].clone();
+
+        let blocks = vec![
+            NoteBlock { id: "b1".into(), block_type: "ai".into(), recommendation_id: Some(rec.id.clone()),
+                original_text: Some(rec.text.clone()), current_text: format!("{} — with a physician addendum.", rec.text), position: 0 },
+        ];
+        repo::save_note_blocks(&mut conn, "REV-1", "PT-1", &blocks).unwrap();
+        // Insert-time decision snapshot: verbatim.
+        repo::upsert_decision(&conn, "REV-1", &RecommendationDecision {
+            recommendation_id: rec.id.clone(), status: "used".into(), original_text: Some(rec.text.clone()),
+            final_text: Some(rec.text.clone()), edit_distance: Some(0), similarity_percent: Some(100.0),
+            decision_elapsed_seconds: None, dismissal_reason: None, decided_at: Some(repo::now_iso()),
+        }).unwrap();
+
+        let (secret, public) = response_seal::generate_keypair();
+        let out = tempfile("response-edit.atbr");
+        build_response(&conn, &path, &out, "ASG-1", &public).unwrap();
+        let imported = import_response(&out, &secret).unwrap();
+
+        let pt = imported.patients.iter().find(|p| p.patient_id == "PT-1").unwrap();
+        let dec = pt.decisions.iter().find(|d| d.recommendation_id == rec.id).unwrap();
+        assert_eq!(dec.status, "used-and-edited", "edited block should reconcile to used-and-edited");
+        assert!(dec.edit_distance.unwrap() > 0, "edit distance should be nonzero after an edit");
+        assert!(dec.final_text.as_deref().unwrap().contains("physician addendum"));
     }
 
     #[test]

@@ -144,6 +144,7 @@ export interface GridAssignment {
 export interface GridReviewer {
   reviewerId: string;
   displayName: string | null;
+  specialty: string | null;
   assignedPatients: GridPatient[];
   assignments: GridAssignment[];
 }
@@ -153,7 +154,11 @@ export interface ReviewerGrid {
 export interface ExportPaths {
   jsonPath: string;
   csvPath: string;
+  surveyCsvPath: string;
+  eventsCsvPath: string;
   recordCount: number;
+  surveyCount: number;
+  eventCount: number;
 }
 
 export const coordinatorIpc = {
@@ -163,8 +168,8 @@ export const coordinatorIpc = {
     invoke<string>("coordinator_add_patient", { researchId, modelId }),
   removePatient: (patientId: string) =>
     invoke<void>("coordinator_remove_patient", { patientId }),
-  addReviewer: (reviewerId: string, displayName: string) =>
-    invoke<void>("coordinator_add_reviewer", { reviewerId, displayName }),
+  addReviewer: (reviewerId: string, displayName: string, specialty?: string) =>
+    invoke<void>("coordinator_add_reviewer", { reviewerId, displayName, specialty: specialty ?? null }),
   assignPatients: (reviewerId: string, patientIds: string[]) =>
     invoke<void>("coordinator_assign_patients", { reviewerId, patientIds }),
   deleteReviewer: (reviewerId: string) =>

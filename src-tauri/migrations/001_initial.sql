@@ -27,6 +27,9 @@ CREATE TABLE studies (
 CREATE TABLE reviewers (
     reviewer_id       TEXT PRIMARY KEY,
     display_name      TEXT,
+    -- Clinical specialty (e.g. 'Medical Oncology'), collected by the coordinator
+    -- and carried through into the response export for subgroup analysis.
+    specialty         TEXT,
     role              TEXT,          -- 'reviewer' | 'coordinator'
     assignment_status TEXT NOT NULL DEFAULT 'not_started'
                       -- 'not_started'|'ready'|'in_progress'|'partially_complete'|'complete'|'submitted'

@@ -217,19 +217,24 @@ pub fn coordinator_add_document(
     })
 }
 
-/// Add (or rename) a reviewer in the roster.
+/// Add (or update) a reviewer in the roster. Upserts so editing name/specialty
+/// on an existing reviewer preserves their assignment status.
 #[tauri::command]
 pub fn coordinator_add_reviewer(
     state: State<CoordinatorState>,
     reviewer_id: String,
     display_name: String,
+    specialty: Option<String>,
 ) -> Result<(), String> {
     with_session(&state, |s| {
         s.conn
             .execute(
-                "INSERT OR REPLACE INTO reviewers(reviewer_id, display_name, role, assignment_status)
-                 VALUES (?1, ?2, 'reviewer', 'ready')",
-                params![reviewer_id, display_name],
+                "INSERT INTO reviewers(reviewer_id, display_name, specialty, role, assignment_status)
+                 VALUES (?1, ?2, ?3, 'reviewer', 'ready')
+                 ON CONFLICT(reviewer_id) DO UPDATE SET
+                     display_name = excluded.display_name,
+                     specialty    = excluded.specialty",
+                params![reviewer_id, display_name, specialty],
             )
             .map_err(map_err)?;
         Ok(())
@@ -762,6 +767,7 @@ pub struct GridAssignment {
 pub struct GridReviewer {
     pub reviewer_id: String,
     pub display_name: Option<String>,
+    pub specialty: Option<String>,
     /// Patients currently assigned to this reviewer (the next package's contents).
     pub assigned_patients: Vec<GridPatient>,
     /// Packages already built (batches) for this reviewer.
@@ -789,13 +795,13 @@ fn build_reviewer_grid(conn: &Connection) -> Result<ReviewerGrid, rusqlite::Erro
     // Roster comes from the reviewers table, so reviewers appear before any
     // package is built.
     let mut rstmt =
-        conn.prepare("SELECT reviewer_id, display_name FROM reviewers WHERE role = 'reviewer' ORDER BY reviewer_id")?;
-    let roster: Vec<(String, Option<String>)> = rstmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        conn.prepare("SELECT reviewer_id, display_name, specialty FROM reviewers WHERE role = 'reviewer' ORDER BY reviewer_id")?;
+    let roster: Vec<(String, Option<String>, Option<String>)> = rstmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut reviewers = Vec::new();
-    for (rid, name) in roster {
+    for (rid, name, specialty) in roster {
         // Currently assigned patients (the next package's contents).
         let assigned_patients: Vec<GridPatient> = {
             let mut pstmt = conn.prepare(
@@ -849,7 +855,7 @@ fn build_reviewer_grid(conn: &Connection) -> Result<ReviewerGrid, rusqlite::Erro
             };
             assignments.push(GridAssignment { assignment_id: aid, created_at, responded, patients });
         }
-        reviewers.push(GridReviewer { reviewer_id: rid, display_name: name, assigned_patients, assignments });
+        reviewers.push(GridReviewer { reviewer_id: rid, display_name: name, specialty, assigned_patients, assignments });
     }
     Ok(ReviewerGrid { reviewers })
 }
@@ -860,6 +866,8 @@ fn build_reviewer_grid(conn: &Connection) -> Result<ReviewerGrid, rusqlite::Erro
 #[serde(rename_all = "camelCase")]
 struct AnalysisRecord {
     reviewer_id: String,
+    reviewer_name: Option<String>,
+    specialty: Option<String>,
     assignment_id: String,
     submitted_at: Option<String>,
     source_assignment_sha256: Option<String>,
@@ -907,7 +915,41 @@ struct AnalysisRecord {
 pub struct ExportPaths {
     pub json_path: String,
     pub csv_path: String,
+    pub survey_csv_path: String,
+    pub events_csv_path: String,
     pub record_count: usize,
+    pub survey_count: usize,
+    pub event_count: usize,
+}
+
+/// One survey answer, exploded from the stored per-scope answer object into a
+/// long-format row (one question/answer per line) for easy pooling in R/Python.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SurveyRecord {
+    reviewer_id: String,
+    reviewer_name: Option<String>,
+    specialty: Option<String>,
+    assignment_id: String,
+    scope: String, // 'per_patient' | 'general'
+    patient_id: Option<String>,
+    question_key: String,
+    answer: String,
+}
+
+/// One timestamped engagement event (rec inserted/dismissed/edited, tab views,
+/// patient start/complete, submit) for trajectory analysis.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EventRecord {
+    reviewer_id: String,
+    reviewer_name: Option<String>,
+    specialty: Option<String>,
+    assignment_id: String,
+    patient_id: Option<String>,
+    event_type: String,
+    event_time: String,
+    payload_json: Option<String>,
 }
 
 /// Write a comprehensive analysis export: a lossless JSON (all responses + a
@@ -921,6 +963,7 @@ pub fn coordinator_export_analysis(
     with_session(&state, |s| {
         let (records, raw): (Vec<AnalysisRecord>, Vec<serde_json::Value>) =
             build_analysis(&s.conn).map_err(map_err)?;
+        let (surveys, events) = build_survey_events(&raw);
         let study_title: String = s
             .conn
             .query_row("SELECT title FROM studies LIMIT 1", [], |r| r.get(0))
@@ -932,20 +975,37 @@ pub fn coordinator_export_analysis(
             .to_string();
         let json_path = format!("{base}.json");
         let csv_path = format!("{base}.csv");
+        let survey_csv_path = format!("{base}_surveys.csv");
+        let events_csv_path = format!("{base}_events.csv");
 
+        // The JSON is the lossless archive: flat analysis records, exploded
+        // survey answers, the engagement event stream, and the verbatim
+        // responses (which themselves already contain every captured datapoint).
         let doc = serde_json::json!({
             "format": "AI_TUMOR_BOARD_ANALYSIS",
-            "version": 1,
+            "version": 2,
             "exported_at": now_iso(),
             "study_title": study_title,
             "response_count": raw.len(),
             "records": records,
+            "surveys": surveys,
+            "events": events,
             "raw_responses": raw,
         });
         std::fs::write(&json_path, serde_json::to_string_pretty(&doc).unwrap()).map_err(map_err)?;
         std::fs::write(&csv_path, records_to_csv(&records)).map_err(map_err)?;
+        std::fs::write(&survey_csv_path, surveys_to_csv(&surveys)).map_err(map_err)?;
+        std::fs::write(&events_csv_path, events_to_csv(&events)).map_err(map_err)?;
 
-        Ok(ExportPaths { json_path, csv_path, record_count: records.len() })
+        Ok(ExportPaths {
+            json_path,
+            csv_path,
+            survey_csv_path,
+            events_csv_path,
+            record_count: records.len(),
+            survey_count: surveys.len(),
+            event_count: events.len(),
+        })
     })
 }
 
@@ -970,6 +1030,8 @@ fn build_analysis(
     for payload in &raw {
         let header = payload.get("header").cloned().unwrap_or(serde_json::Value::Null);
         let reviewer_id = s(&header, "reviewerId").unwrap_or_default();
+        let reviewer_name = s(payload, "reviewerName");
+        let specialty = s(payload, "reviewerSpecialty");
         let assignment_id = s(&header, "assignmentId").unwrap_or_default();
         let submitted_at = s(&header, "submittedAt");
         let source_sha = s(&header, "sourceAssignmentSha256");
@@ -1022,6 +1084,8 @@ fn build_analysis(
                 };
                 records.push(AnalysisRecord {
                     reviewer_id: reviewer_id.clone(),
+                    reviewer_name: reviewer_name.clone(),
+                    specialty: specialty.clone(),
                     assignment_id: assignment_id.clone(),
                     submitted_at: submitted_at.clone(),
                     source_assignment_sha256: source_sha.clone(),
@@ -1079,7 +1143,7 @@ fn csv_field(s: &str) -> String {
 
 fn records_to_csv(records: &[AnalysisRecord]) -> String {
     let header = [
-        "reviewer_id", "assignment_id", "submitted_at", "source_assignment_sha256", "app_version", "schema_version",
+        "reviewer_id", "reviewer_name", "specialty", "assignment_id", "submitted_at", "source_assignment_sha256", "app_version", "schema_version",
         "patient_id", "research_id", "model_id", "cancer_type", "clinical_question", "patient_status", "elapsed_seconds",
         "note_word_count", "note_char_count", "pct_physician_original", "pct_ai_unmodified", "pct_ai_edited",
         "pct_derived_from_llm", "chars_typed_by_physician", "chars_from_llm_unmodified", "chars_from_llm_edited",
@@ -1096,7 +1160,7 @@ fn records_to_csv(records: &[AnalysisRecord]) -> String {
     out.push('\n');
     for r in records {
         let cols = [
-            r.reviewer_id.clone(), r.assignment_id.clone(), os(&r.submitted_at), os(&r.source_assignment_sha256),
+            r.reviewer_id.clone(), os(&r.reviewer_name), os(&r.specialty), r.assignment_id.clone(), os(&r.submitted_at), os(&r.source_assignment_sha256),
             os(&r.app_version), oi(&r.schema_version), r.patient_id.clone(), os(&r.research_id), os(&r.model_id),
             os(&r.cancer_type), os(&r.clinical_question), r.patient_status.clone(), r.elapsed_seconds.to_string(),
             r.note_word_count.to_string(), r.note_char_count.to_string(), r.pct_physician_original.to_string(),
@@ -1106,6 +1170,125 @@ fn records_to_csv(records: &[AnalysisRecord]) -> String {
             os(&r.evidence_tier), of(&r.risk_score), of(&r.safety_score), oi(&r.priority_rank), r.disposition.clone(),
             r.status.clone(), r.was_used.to_string(), r.was_altered.to_string(), oi(&r.edit_distance), of(&r.similarity_percent),
             r.original_ai_text.clone(), os(&r.final_text_in_note), os(&r.dismissal_reason), os(&r.decided_at), r.final_note_text.clone(),
+        ];
+        out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// Flatten every imported response's surveys and events into long-format rows.
+/// Each survey scope stores one JSON object of answers; we explode it into one
+/// row per question so the result pools directly in a stats package.
+fn build_survey_events(raw: &[serde_json::Value]) -> (Vec<SurveyRecord>, Vec<EventRecord>) {
+    let s = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_str()).map(String::from);
+    let mut surveys = Vec::new();
+    let mut events = Vec::new();
+
+    for payload in raw {
+        let header = payload.get("header").cloned().unwrap_or(serde_json::Value::Null);
+        let reviewer_id = s(&header, "reviewerId").unwrap_or_default();
+        let assignment_id = s(&header, "assignmentId").unwrap_or_default();
+        let reviewer_name = s(payload, "reviewerName");
+        let specialty = s(payload, "reviewerSpecialty");
+
+        if let Some(arr) = payload.get("surveys").and_then(|v| v.as_array()) {
+            for entry in arr {
+                let scope = s(entry, "questionId").unwrap_or_default();
+                let patient_id = s(entry, "patientId");
+                match entry.get("response") {
+                    // Normal case: an object of question -> answer pairs.
+                    Some(serde_json::Value::Object(map)) => {
+                        for (question_key, answer) in map {
+                            surveys.push(SurveyRecord {
+                                reviewer_id: reviewer_id.clone(),
+                                reviewer_name: reviewer_name.clone(),
+                                specialty: specialty.clone(),
+                                assignment_id: assignment_id.clone(),
+                                scope: scope.clone(),
+                                patient_id: patient_id.clone(),
+                                question_key: question_key.clone(),
+                                answer: json_scalar(answer),
+                            });
+                        }
+                    }
+                    // Fallback: a bare value stored under the scope id.
+                    Some(other) => surveys.push(SurveyRecord {
+                        reviewer_id: reviewer_id.clone(),
+                        reviewer_name: reviewer_name.clone(),
+                        specialty: specialty.clone(),
+                        assignment_id: assignment_id.clone(),
+                        scope: scope.clone(),
+                        patient_id: patient_id.clone(),
+                        question_key: scope.clone(),
+                        answer: json_scalar(other),
+                    }),
+                    None => {}
+                }
+            }
+        }
+
+        if let Some(arr) = payload.get("events").and_then(|v| v.as_array()) {
+            for ev in arr {
+                events.push(EventRecord {
+                    reviewer_id: reviewer_id.clone(),
+                    reviewer_name: reviewer_name.clone(),
+                    specialty: specialty.clone(),
+                    assignment_id: assignment_id.clone(),
+                    patient_id: s(ev, "patientId"),
+                    event_type: s(ev, "eventType").unwrap_or_default(),
+                    event_time: s(ev, "eventTime").unwrap_or_default(),
+                    payload_json: ev.get("payload").filter(|p| !p.is_null()).map(|p| p.to_string()),
+                });
+            }
+        }
+    }
+    (surveys, events)
+}
+
+/// Render a JSON value as a plain CSV cell (strings unquoted, everything else
+/// as compact JSON) so survey answers stay human-readable.
+fn json_scalar(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    }
+}
+
+fn surveys_to_csv(rows: &[SurveyRecord]) -> String {
+    let header = [
+        "reviewer_id", "reviewer_name", "specialty", "assignment_id", "scope", "patient_id",
+        "question_key", "answer",
+    ];
+    let os = |o: &Option<String>| o.clone().unwrap_or_default();
+    let mut out = String::new();
+    out.push_str(&header.join(","));
+    out.push('\n');
+    for r in rows {
+        let cols = [
+            r.reviewer_id.clone(), os(&r.reviewer_name), os(&r.specialty), r.assignment_id.clone(),
+            r.scope.clone(), os(&r.patient_id), r.question_key.clone(), r.answer.clone(),
+        ];
+        out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
+        out.push('\n');
+    }
+    out
+}
+
+fn events_to_csv(rows: &[EventRecord]) -> String {
+    let header = [
+        "reviewer_id", "reviewer_name", "specialty", "assignment_id", "patient_id",
+        "event_type", "event_time", "payload_json",
+    ];
+    let os = |o: &Option<String>| o.clone().unwrap_or_default();
+    let mut out = String::new();
+    out.push_str(&header.join(","));
+    out.push('\n');
+    for r in rows {
+        let cols = [
+            r.reviewer_id.clone(), os(&r.reviewer_name), os(&r.specialty), r.assignment_id.clone(),
+            os(&r.patient_id), r.event_type.clone(), r.event_time.clone(), os(&r.payload_json),
         ];
         out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
         out.push('\n');
@@ -1292,6 +1475,44 @@ mod tests {
         // CSV = header + 2 rows.
         let csv = records_to_csv(&records);
         assert_eq!(csv.lines().count(), 3);
-        assert!(csv.starts_with("reviewer_id,assignment_id"));
+        assert!(csv.starts_with("reviewer_id,reviewer_name,specialty,assignment_id"));
+    }
+
+    #[test]
+    fn survey_and_event_flattening() {
+        let raw = vec![serde_json::json!({
+            "header": {"reviewerId":"REV-A","assignmentId":"ASG-1"},
+            "reviewerName": "Dr. Ada",
+            "reviewerSpecialty": "Medical Oncology",
+            "surveys": [
+                {"patientId":"PT-1","questionId":"per_patient","response":{"trust":"4","clarity":"agree"}},
+                {"patientId":null,"questionId":"general","response":{"overall":"5"}}
+            ],
+            "events": [
+                {"eventType":"PATIENT_OPENED","patientId":"PT-1","eventTime":"2026-07-10T00:00:00Z","payload":null},
+                {"eventType":"RECOMMENDATION_INSERTED","patientId":"PT-1","eventTime":"2026-07-10T00:01:00Z","payload":{"recommendationId":"PT-1:1"}}
+            ]
+        })];
+
+        let (surveys, events) = build_survey_events(&raw);
+        // 2 per-patient answers + 1 general answer.
+        assert_eq!(surveys.len(), 3);
+        let trust = surveys.iter().find(|s| s.question_key == "trust").unwrap();
+        assert_eq!(trust.answer, "4");
+        assert_eq!(trust.scope, "per_patient");
+        assert_eq!(trust.patient_id.as_deref(), Some("PT-1"));
+        assert_eq!(trust.reviewer_name.as_deref(), Some("Dr. Ada"));
+        assert_eq!(trust.specialty.as_deref(), Some("Medical Oncology"));
+        let general = surveys.iter().find(|s| s.scope == "general").unwrap();
+        assert_eq!(general.question_key, "overall");
+        assert!(general.patient_id.is_none());
+
+        assert_eq!(events.len(), 2);
+        let ins = events.iter().find(|e| e.event_type == "RECOMMENDATION_INSERTED").unwrap();
+        assert!(ins.payload_json.as_deref().unwrap().contains("PT-1:1"));
+
+        // CSV headers present.
+        assert!(surveys_to_csv(&surveys).starts_with("reviewer_id,reviewer_name,specialty,assignment_id,scope,patient_id,question_key,answer"));
+        assert!(events_to_csv(&events).starts_with("reviewer_id,reviewer_name,specialty,assignment_id,patient_id,event_type,event_time,payload_json"));
     }
 }
