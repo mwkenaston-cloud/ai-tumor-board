@@ -21,7 +21,7 @@ use zeroize::Zeroize;
 
 use super::connection::{self as dbc, DbError};
 use super::metrics::{self, AttributionMetrics};
-use super::models::{NoteBlock, RecommendationDecision};
+use super::models::{NoteBlock, Recommendation, RecommendationDecision};
 use super::repository as repo;
 use crate::crypto::response_seal;
 
@@ -86,10 +86,19 @@ pub struct ResponseReceipt {
 pub struct PatientResponse {
     pub patient_id: String,
     pub research_id: Option<String>,
+    // Case identity carried in the response so the coordinator analysis export is
+    // self-contained — it no longer needs to re-derive these (or the
+    // recommendation set) from the current workspace by internal patient id.
+    pub model_id: Option<String>,
+    pub cancer_type: Option<String>,
+    pub clinical_question: Option<String>,
     pub status: String,
     pub elapsed_seconds: i64,
     pub final_text: String,
     pub attribution: AttributionMetrics,
+    /// The recommendation set the reviewer saw, so the export can flatten one
+    /// row per recommendation without consulting the workspace.
+    pub recommendations: Vec<Recommendation>,
     pub decisions: Vec<RecommendationDecision>,
     pub note_blocks: Vec<NoteBlock>,
 }
@@ -218,10 +227,14 @@ fn read_payload(conn: &Connection, header: &ResponseHeader) -> Result<ImportedRe
         patients.push(PatientResponse {
             patient_id: p.id,
             research_id: p.research_id,
+            model_id: p.model_id,
+            cancer_type: p.cancer_type,
+            clinical_question: p.clinical_question,
             status: p.status,
             elapsed_seconds: p.elapsed_seconds,
             final_text,
             attribution,
+            recommendations: p.recommendations,
             decisions: p.decisions,
             note_blocks: p.note_blocks,
         });

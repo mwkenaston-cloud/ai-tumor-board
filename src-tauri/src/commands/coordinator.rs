@@ -933,6 +933,8 @@ struct SurveyRecord {
     assignment_id: String,
     scope: String, // 'per_patient' | 'general'
     patient_id: Option<String>,
+    research_id: Option<String>,
+    model_id: Option<String>,
     question_key: String,
     answer: String,
 }
@@ -947,6 +949,8 @@ struct EventRecord {
     specialty: Option<String>,
     assignment_id: String,
     patient_id: Option<String>,
+    research_id: Option<String>,
+    model_id: Option<String>,
     event_type: String,
     event_time: String,
     payload_json: Option<String>,
@@ -1044,10 +1048,19 @@ fn build_analysis(
             let attribution = pt.get("attribution").cloned().unwrap_or(serde_json::Value::Null);
             let final_note = s(pt, "finalText").unwrap_or_default();
 
-            // Patient identity from the workspace.
-            let (model_id_ws, cancer_type, clinical_question): (Option<String>, Option<String>, Option<String>) = conn
-                .query_row("SELECT model_id, cancer_type, clinical_question FROM patients WHERE patient_id = ?1", [&patient_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap_or((None, None, None));
+            // Case identity: prefer the response payload (self-contained), fall
+            // back to the workspace for responses imported by an older build.
+            let (model_id, cancer_type, clinical_question): (Option<String>, Option<String>, Option<String>) =
+                if pt.get("modelId").is_some() || pt.get("cancerType").is_some() || pt.get("clinicalQuestion").is_some() {
+                    (s(pt, "modelId"), s(pt, "cancerType"), s(pt, "clinicalQuestion"))
+                } else {
+                    conn.query_row(
+                        "SELECT model_id, cancer_type, clinical_question FROM patients WHERE patient_id = ?1",
+                        [&patient_id],
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    )
+                    .unwrap_or((None, None, None))
+                };
 
             // Decisions keyed by recommendation id.
             let mut dmap: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
@@ -1059,18 +1072,39 @@ fn build_analysis(
                 }
             }
 
-            // Workspace recommendation set for this patient.
-            let mut rstmt = conn.prepare(
-                "SELECT recommendation_id, COALESCE(title, recommendation_id), temperature_level, temperature_label,
-                        evidence_tier, risk_score, safety_score, priority_rank, recommendation_text
-                 FROM recommendations WHERE patient_id = ?1 ORDER BY position",
-            )?;
-            let recs = rstmt.query_map([&patient_id], |r| {
-                Ok((
-                    r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<String>>(3)?,
-                    r.get::<_, Option<String>>(4)?, r.get::<_, Option<f64>>(5)?, r.get::<_, Option<f64>>(6)?, r.get::<_, Option<i64>>(7)?, r.get::<_, String>(8)?,
-                ))
-            })?.collect::<Result<Vec<_>, _>>()?;
+            // Recommendation set: from the payload if present, else the workspace.
+            type RecTuple = (String, String, Option<i64>, Option<String>, Option<String>, Option<f64>, Option<f64>, Option<i64>, String);
+            let recs: Vec<RecTuple> = if let Some(rs) = pt.get("recommendations").and_then(|v| v.as_array()) {
+                rs.iter()
+                    .map(|r| {
+                        let rid = s(r, "id").unwrap_or_default();
+                        let title = s(r, "title").unwrap_or_else(|| rid.clone());
+                        (
+                            rid, title,
+                            r.get("temperatureLevel").and_then(|x| x.as_i64()),
+                            s(r, "temperatureLabel"),
+                            s(r, "evidenceTier"),
+                            r.get("riskScore").and_then(|x| x.as_f64()),
+                            r.get("safetyScore").and_then(|x| x.as_f64()),
+                            r.get("priorityRank").and_then(|x| x.as_i64()),
+                            s(r, "text").unwrap_or_default(),
+                        )
+                    })
+                    .collect()
+            } else {
+                let mut rstmt = conn.prepare(
+                    "SELECT recommendation_id, COALESCE(title, recommendation_id), temperature_level, temperature_label,
+                            evidence_tier, risk_score, safety_score, priority_rank, recommendation_text
+                     FROM recommendations WHERE patient_id = ?1 ORDER BY position",
+                )?;
+                let v: Vec<RecTuple> = rstmt.query_map([&patient_id], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<String>>(3)?,
+                        r.get::<_, Option<String>>(4)?, r.get::<_, Option<f64>>(5)?, r.get::<_, Option<f64>>(6)?, r.get::<_, Option<i64>>(7)?, r.get::<_, String>(8)?,
+                    ))
+                })?.collect::<Result<Vec<_>, _>>()?;
+                v
+            };
 
             for (rid, title, temp, temp_label, ev, risk, safety, prio, ai_text) in recs {
                 let dec = dmap.get(&rid);
@@ -1093,7 +1127,7 @@ fn build_analysis(
                     schema_version,
                     patient_id: patient_id.clone(),
                     research_id: s(pt, "researchId"),
-                    model_id: model_id_ws.clone(),
+                    model_id: model_id.clone(),
                     cancer_type: cancer_type.clone(),
                     clinical_question: clinical_question.clone(),
                     patient_status: s(pt, "status").unwrap_or_default(),
@@ -1192,10 +1226,25 @@ fn build_survey_events(raw: &[serde_json::Value]) -> (Vec<SurveyRecord>, Vec<Eve
         let reviewer_name = s(payload, "reviewerName");
         let specialty = s(payload, "reviewerSpecialty");
 
+        // Map internal patient_id -> (research_id, model_id) so survey/event rows
+        // carry the human-meaningful identifiers, not just the opaque UUID.
+        let mut ident: std::collections::HashMap<String, (Option<String>, Option<String>)> = std::collections::HashMap::new();
+        if let Some(pts) = payload.get("patients").and_then(|v| v.as_array()) {
+            for pt in pts {
+                if let Some(pid) = s(pt, "patientId") {
+                    ident.insert(pid, (s(pt, "researchId"), s(pt, "modelId")));
+                }
+            }
+        }
+        let ids_for = |pid: &Option<String>| -> (Option<String>, Option<String>) {
+            pid.as_ref().and_then(|p| ident.get(p)).cloned().unwrap_or((None, None))
+        };
+
         if let Some(arr) = payload.get("surveys").and_then(|v| v.as_array()) {
             for entry in arr {
                 let scope = s(entry, "questionId").unwrap_or_default();
                 let patient_id = s(entry, "patientId");
+                let (research_id, model_id) = ids_for(&patient_id);
                 match entry.get("response") {
                     // Normal case: an object of question -> answer pairs.
                     Some(serde_json::Value::Object(map)) => {
@@ -1207,6 +1256,8 @@ fn build_survey_events(raw: &[serde_json::Value]) -> (Vec<SurveyRecord>, Vec<Eve
                                 assignment_id: assignment_id.clone(),
                                 scope: scope.clone(),
                                 patient_id: patient_id.clone(),
+                                research_id: research_id.clone(),
+                                model_id: model_id.clone(),
                                 question_key: question_key.clone(),
                                 answer: json_scalar(answer),
                             });
@@ -1220,6 +1271,8 @@ fn build_survey_events(raw: &[serde_json::Value]) -> (Vec<SurveyRecord>, Vec<Eve
                         assignment_id: assignment_id.clone(),
                         scope: scope.clone(),
                         patient_id: patient_id.clone(),
+                        research_id: research_id.clone(),
+                        model_id: model_id.clone(),
                         question_key: scope.clone(),
                         answer: json_scalar(other),
                     }),
@@ -1230,12 +1283,16 @@ fn build_survey_events(raw: &[serde_json::Value]) -> (Vec<SurveyRecord>, Vec<Eve
 
         if let Some(arr) = payload.get("events").and_then(|v| v.as_array()) {
             for ev in arr {
+                let patient_id = s(ev, "patientId");
+                let (research_id, model_id) = ids_for(&patient_id);
                 events.push(EventRecord {
                     reviewer_id: reviewer_id.clone(),
                     reviewer_name: reviewer_name.clone(),
                     specialty: specialty.clone(),
                     assignment_id: assignment_id.clone(),
-                    patient_id: s(ev, "patientId"),
+                    patient_id,
+                    research_id,
+                    model_id,
                     event_type: s(ev, "eventType").unwrap_or_default(),
                     event_time: s(ev, "eventTime").unwrap_or_default(),
                     payload_json: ev.get("payload").filter(|p| !p.is_null()).map(|p| p.to_string()),
@@ -1259,7 +1316,7 @@ fn json_scalar(v: &serde_json::Value) -> String {
 fn surveys_to_csv(rows: &[SurveyRecord]) -> String {
     let header = [
         "reviewer_id", "reviewer_name", "specialty", "assignment_id", "scope", "patient_id",
-        "question_key", "answer",
+        "research_id", "model_id", "question_key", "answer",
     ];
     let os = |o: &Option<String>| o.clone().unwrap_or_default();
     let mut out = String::new();
@@ -1268,7 +1325,8 @@ fn surveys_to_csv(rows: &[SurveyRecord]) -> String {
     for r in rows {
         let cols = [
             r.reviewer_id.clone(), os(&r.reviewer_name), os(&r.specialty), r.assignment_id.clone(),
-            r.scope.clone(), os(&r.patient_id), r.question_key.clone(), r.answer.clone(),
+            r.scope.clone(), os(&r.patient_id), os(&r.research_id), os(&r.model_id),
+            r.question_key.clone(), r.answer.clone(),
         ];
         out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
         out.push('\n');
@@ -1279,7 +1337,7 @@ fn surveys_to_csv(rows: &[SurveyRecord]) -> String {
 fn events_to_csv(rows: &[EventRecord]) -> String {
     let header = [
         "reviewer_id", "reviewer_name", "specialty", "assignment_id", "patient_id",
-        "event_type", "event_time", "payload_json",
+        "research_id", "model_id", "event_type", "event_time", "payload_json",
     ];
     let os = |o: &Option<String>| o.clone().unwrap_or_default();
     let mut out = String::new();
@@ -1288,7 +1346,8 @@ fn events_to_csv(rows: &[EventRecord]) -> String {
     for r in rows {
         let cols = [
             r.reviewer_id.clone(), os(&r.reviewer_name), os(&r.specialty), r.assignment_id.clone(),
-            os(&r.patient_id), r.event_type.clone(), r.event_time.clone(), os(&r.payload_json),
+            os(&r.patient_id), os(&r.research_id), os(&r.model_id),
+            r.event_type.clone(), r.event_time.clone(), os(&r.payload_json),
         ];
         out.push_str(&cols.iter().map(|c| csv_field(c)).collect::<Vec<_>>().join(","));
         out.push('\n');
@@ -1484,6 +1543,7 @@ mod tests {
             "header": {"reviewerId":"REV-A","assignmentId":"ASG-1"},
             "reviewerName": "Dr. Ada",
             "reviewerSpecialty": "Medical Oncology",
+            "patients": [{"patientId":"PT-1","researchId":"PCA001","modelId":"GPT5"}],
             "surveys": [
                 {"patientId":"PT-1","questionId":"per_patient","response":{"trust":"4","clarity":"agree"}},
                 {"patientId":null,"questionId":"general","response":{"overall":"5"}}
@@ -1501,6 +1561,9 @@ mod tests {
         assert_eq!(trust.answer, "4");
         assert_eq!(trust.scope, "per_patient");
         assert_eq!(trust.patient_id.as_deref(), Some("PT-1"));
+        // Per-patient survey rows carry the meaningful identifiers.
+        assert_eq!(trust.research_id.as_deref(), Some("PCA001"));
+        assert_eq!(trust.model_id.as_deref(), Some("GPT5"));
         assert_eq!(trust.reviewer_name.as_deref(), Some("Dr. Ada"));
         assert_eq!(trust.specialty.as_deref(), Some("Medical Oncology"));
         let general = surveys.iter().find(|s| s.scope == "general").unwrap();
@@ -1510,9 +1573,49 @@ mod tests {
         assert_eq!(events.len(), 2);
         let ins = events.iter().find(|e| e.event_type == "RECOMMENDATION_INSERTED").unwrap();
         assert!(ins.payload_json.as_deref().unwrap().contains("PT-1:1"));
+        assert_eq!(ins.research_id.as_deref(), Some("PCA001"));
+        assert_eq!(ins.model_id.as_deref(), Some("GPT5"));
 
         // CSV headers present.
-        assert!(surveys_to_csv(&surveys).starts_with("reviewer_id,reviewer_name,specialty,assignment_id,scope,patient_id,question_key,answer"));
-        assert!(events_to_csv(&events).starts_with("reviewer_id,reviewer_name,specialty,assignment_id,patient_id,event_type,event_time,payload_json"));
+        assert!(surveys_to_csv(&surveys).starts_with("reviewer_id,reviewer_name,specialty,assignment_id,scope,patient_id,research_id,model_id,question_key,answer"));
+        assert!(events_to_csv(&events).starts_with("reviewer_id,reviewer_name,specialty,assignment_id,patient_id,research_id,model_id,event_type,event_time,payload_json"));
+    }
+
+    #[test]
+    fn analysis_records_come_from_payload_when_workspace_lacks_patient() {
+        // Reproduces the empty-CSV bug: a response whose patient/recs are NOT in
+        // the current workspace must still yield rows, sourced from the payload.
+        let conn = container::create(&tmp(), "pw", ContainerRole::Coordinator).unwrap();
+        conn.execute_batch("CREATE TABLE response_payloads(assignment_id TEXT, reviewer_id TEXT, payload_json TEXT);").unwrap();
+        // Note: no `patients` or `recommendations` rows inserted into the workspace.
+
+        let payload = serde_json::json!({
+            "header": {"reviewerId":"REV-A","assignmentId":"ASG-1","submittedAt":"2026-07-27T00:00:00Z"},
+            "patients": [{
+                "patientId":"PT-orphan","researchId":"PCA001","modelId":"GPT5","cancerType":"Prostate","clinicalQuestion":"Surgery?",
+                "status":"complete","elapsedSeconds":120,
+                "attribution": {"wordCount":10,"charCount":60,"pctPhysicianOriginal":0.0,"pctAiUnmodified":100.0,"pctAiEdited":0.0,"pctDerivedFromLlm":100.0,"charsTypedByPhysician":0,"charsFromLlmUnmodified":60,"charsFromLlmEdited":0},
+                "finalText":"Final.",
+                "recommendations": [
+                    {"id":"PT-orphan:1","title":"Rec 1","temperatureLevel":1,"temperatureLabel":"Conservative","evidenceTier":"II","riskScore":2.0,"safetyScore":90.0,"priorityRank":1,"text":"Do X."}
+                ],
+                "decisions": [
+                    {"recommendationId":"PT-orphan:1","status":"used","editDistance":0,"similarityPercent":100.0,"finalText":"Do X.","decidedAt":"2026-07-27T00:01:00Z"}
+                ]
+            }]
+        });
+        conn.execute("INSERT INTO response_payloads(assignment_id,reviewer_id,payload_json) VALUES ('ASG-1','REV-A',?1)", [payload.to_string()]).unwrap();
+
+        let (records, _raw) = build_analysis(&conn).unwrap();
+        assert_eq!(records.len(), 1, "payload recommendation must produce a row even with an empty workspace");
+        let r = &records[0];
+        assert_eq!(r.recommendation_id, "PT-orphan:1");
+        assert_eq!(r.research_id.as_deref(), Some("PCA001"));
+        assert_eq!(r.model_id.as_deref(), Some("GPT5"), "model_id must come from the payload");
+        assert_eq!(r.cancer_type.as_deref(), Some("Prostate"));
+        assert_eq!(r.disposition, "accepted");
+        assert_eq!(r.original_ai_text, "Do X.");
+        // And the CSV actually has a data row.
+        assert_eq!(records_to_csv(&records).lines().count(), 2);
     }
 }

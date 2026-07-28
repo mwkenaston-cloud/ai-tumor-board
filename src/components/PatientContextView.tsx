@@ -49,6 +49,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+/** A prominent, numbered top-level grouping so the reader can see how a block of
+ *  information is organized and why it flows from top to bottom. */
+function GroupHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <div style={{ margin: "0 0 12px", paddingBottom: 6, borderBottom: "2px solid var(--border-2)" }}>
+      <h2 style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", margin: 0 }}>{title}</h2>
+      {subtitle && <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.45 }}>{subtitle}</div>}
+    </div>
+  );
+}
+
 function KeyValueList({ items, fields }: { items: Record<string, unknown>[]; fields: string[] }) {
   if (!items || items.length === 0) return <div className="doc-empty">None documented.</div>;
   return (
@@ -91,15 +102,21 @@ function ComorbidityView({ comorbidities }: { comorbidities: unknown }) {
   const cciAge = num(cci.age_adjusted_score);
   const surv = num(cci.estimated_10yr_survival_pct);
 
+  // Ordered top → bottom so the reader moves from the big picture to the detail
+  // and finally to the caveats: overall summary → the CCI score → what drives
+  // that score → treatment-relevant flags → other conditions → what was ruled
+  // out → confidence/data gaps.
   return (
     <div>
       {narrative && (
-        <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 12px", marginBottom: 16, fontSize: 12.5, color: "#1e293b", lineHeight: 1.6 }}>
-          {narrative}
-        </div>
+        <Section title="Overall comorbidity burden">
+          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#1e293b", lineHeight: 1.6 }}>
+            {narrative}
+          </div>
+        </Section>
       )}
 
-      <Section title="Charlson Comorbidity Index">
+      <Section title="Charlson Comorbidity Index (CCI)">
         {cciUnadj != null || cciAge != null || surv != null ? (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
             {cciUnadj != null && <ScorePill label="CCI" value={String(cciUnadj)} />}
@@ -114,8 +131,22 @@ function ComorbidityView({ comorbidities }: { comorbidities: unknown }) {
         )}
       </Section>
 
+      {drivers.length > 0 && (
+        <Section title="What drives that score">
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {drivers.map((d, i) => (
+              <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                <strong>{str(d.condition)}</strong>
+                {num(d.cci_weight) != null && <span style={{ color: "var(--muted)" }}> (weight {num(d.cci_weight)})</span>}
+                {str(d.weighting_rationale) && <> — {str(d.weighting_rationale)}</>}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
       {(presentFlags.length > 0 || activeFlags.length > 0) && (
-        <Section title="Active treatment-relevant flags">
+        <Section title="Treatment-relevant flags (active)">
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {(activeFlags.length > 0 ? activeFlags : presentFlags).map((f, i) => (
               <div key={i} style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 10px" }}>
@@ -133,17 +164,15 @@ function ComorbidityView({ comorbidities }: { comorbidities: unknown }) {
         </Section>
       )}
 
-      {drivers.length > 0 && (
-        <Section title="Primary score drivers">
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {drivers.map((d, i) => (
-              <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                <strong>{str(d.condition)}</strong>
-                {num(d.cci_weight) != null && <span style={{ color: "var(--muted)" }}> (weight {num(d.cci_weight)})</span>}
-                {str(d.weighting_rationale) && <> — {str(d.weighting_rationale)}</>}
-              </div>
-            ))}
-          </div>
+      {other.length > 0 && (
+        <Section title="Other documented comorbidities">
+          <KeyValueList items={other} fields={["condition", "status", "details", "source_quote"]} />
+        </Section>
+      )}
+
+      {negativeFlags.length > 0 && (
+        <Section title="Screened & negative / undocumented">
+          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{negativeFlags.join(", ")}.</div>
         </Section>
       )}
 
@@ -160,18 +189,6 @@ function ComorbidityView({ comorbidities }: { comorbidities: unknown }) {
             </div>
           )}
         </Section>
-      )}
-
-      {other.length > 0 && (
-        <Section title="Other comorbidities">
-          <KeyValueList items={other} fields={["condition", "status", "details", "source_quote"]} />
-        </Section>
-      )}
-
-      {negativeFlags.length > 0 && (
-        <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 4 }}>
-          Screened & negative/undocumented: {negativeFlags.join(", ")}.
-        </div>
       )}
     </div>
   );
@@ -240,7 +257,10 @@ export default function PatientContextView({ patient }: { patient: Patient }) {
       {/* Left half: profile + timeline/history toggle */}
       <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "16px 20px", background: "var(--surface-2)", borderRight: "1px solid var(--border-2)" }}>
         {ctx.patient_profile && (
-          <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6, marginBottom: 14 }}>{ctx.patient_profile}</div>
+          <div style={{ marginBottom: 16 }}>
+            <GroupHeader title="Patient summary" />
+            <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>{ctx.patient_profile}</div>
+          </div>
         )}
         <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
           <button className={`btn btn-sm ${view === "timeline" ? "btn-primary" : "btn-ghost"}`} onClick={() => setView("timeline")}>
@@ -255,10 +275,17 @@ export default function PatientContextView({ patient }: { patient: Patient }) {
           <Timeline events={timeline} />
         ) : (
           <>
-            <Section title="Comorbidities">
+            <div style={{ marginBottom: 22 }}>
+              <GroupHeader
+                title="Comorbidity burden"
+                subtitle="From the overall picture down to the specifics: summary, the CCI score, what drives it, treatment-relevant flags, and finally what's uncertain."
+              />
               <ComorbidityView comorbidities={ctx.comorbidities} />
-            </Section>
-            <Genetics family={family} />
+            </div>
+            <div>
+              <GroupHeader title="Genetics & family history" />
+              <Genetics family={family} />
+            </div>
           </>
         )}
       </div>

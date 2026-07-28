@@ -106,15 +106,25 @@ the app tracks how text entered the note, not post-hoc string resemblance.
 ### `NAME_surveys.csv`
 
 `reviewer_id, reviewer_name, specialty, assignment_id, scope, patient_id,
-question_key, answer` — one row per answer. `scope` is `per_patient` (with a
-`patient_id`) or `general`.
+research_id, model_id, question_key, answer` — one row per answer. `scope` is
+`per_patient` (with a `patient_id`/`research_id`/`model_id`) or `general`.
 
 ### `NAME_events.csv`
 
-`reviewer_id, reviewer_name, specialty, assignment_id, patient_id, event_type,
-event_time, payload_json` — the engagement trajectory: `PATIENT_OPENED/COMPLETED`,
-`RECOMMENDATION_INSERTED/DISMISSED/REMOVED`, `TAB_VIEWED` (with per-tab dwell
-seconds), `SURVEY_COMPLETED`, `ASSIGNMENT_SUBMITTED`, etc.
+`reviewer_id, reviewer_name, specialty, assignment_id, patient_id, research_id,
+model_id, event_type, event_time, payload_json` — the engagement trajectory:
+`PATIENT_OPENED/COMPLETED`, `RECOMMENDATION_INSERTED/DISMISSED/REMOVED`,
+`TAB_VIEWED` (with per-tab dwell seconds), `SURVEY_COMPLETED`,
+`ASSIGNMENT_SUBMITTED`, etc.
+
+### Self-contained responses
+
+The main CSV is built from each `.atbr` response itself — model_id, cancer type,
+clinical question, and the recommendation set are carried inside the response, so
+the export no longer depends on the coordinator workspace still holding those
+patients. (A response imported by an older build that predates this is filled in
+from the workspace as a fallback; re-import such responses to pick up the
+embedded copy.)
 
 ## Versioning note
 
