@@ -63,6 +63,9 @@ export default function PatientReview() {
   const orderedRecs = [...p.recommendations].sort(
     (a, b) => (a.priorityRank ?? 999) - (b.priorityRank ?? 999) || a.position - b.position
   );
+  // The AI's single highest-ranked recommendation gets a "most applicable" badge
+  // (only when a real priority ranking exists).
+  const topPickId = orderedRecs[0]?.priorityRank != null ? orderedRecs[0].id : null;
 
   const onChangeBlock = (id: string, text: string) => {
     const next: NoteBlock[] = p.noteBlocks.map((b) =>
@@ -119,6 +122,7 @@ export default function PatientReview() {
                     rec={rec}
                     decision={decisionFor(rec.id)}
                     settings={settings}
+                    isTopPick={rec.id === topPickId}
                     onInsert={() => actions.insertRecommendation(p.id, rec.id)}
                     onDismiss={() => actions.dismissRecommendation(p.id, rec.id)}
                     onUndoInsert={() => actions.undoInsert(p.id, rec.id)}

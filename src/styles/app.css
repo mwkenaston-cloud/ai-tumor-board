@@ -349,3 +349,12 @@ body {
 .tut-dot { width: 8px; height: 8px; border-radius: 999px; border: none; padding: 0; cursor: pointer; background: var(--border-2); }
 .tut-dot.on { background: var(--primary); width: 20px; }
 .tut-footer { display: flex; justify-content: space-between; align-items: center; }
+
+/* ── AI "most applicable" recommendation highlight ──────────────────────── */
+.rec-card.top-pick { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14); }
+.top-pick-banner {
+  display: inline-block;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  color: #fff; background: var(--primary);
+  border-radius: 999px; padding: 3px 10px; margin-bottom: 8px;
+}

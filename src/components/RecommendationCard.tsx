@@ -37,6 +37,8 @@ interface Props {
   rec: Recommendation;
   decision?: RecommendationDecision;
   settings: StudySettings;
+  /** True for the recommendation the AI ranked highest (priority 1). */
+  isTopPick?: boolean;
   onInsert: () => void;
   onDismiss: () => void;
   onUndoInsert: () => void;
@@ -47,6 +49,7 @@ export default function RecommendationCard({
   rec,
   decision,
   settings,
+  isTopPick = false,
   onInsert,
   onDismiss,
   onUndoInsert,
@@ -86,7 +89,12 @@ export default function RecommendationCard({
       : "";
 
   return (
-    <div className={`rec-card ${cardClass}`}>
+    <div className={`rec-card ${cardClass}${isTopPick && settings.showPriority ? " top-pick" : ""}`}>
+      {isTopPick && settings.showPriority && (
+        <div className="top-pick-banner" title="The AI ranked this recommendation highest (priority 1). It's still your call — you can use, edit, or dismiss it.">
+          ★ AI's most applicable recommendation
+        </div>
+      )}
       {status !== "pending" && (
         <span
           className={`status-tag ${
