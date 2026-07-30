@@ -106,6 +106,12 @@ export default function PatientReview() {
                 <h2>AI recommendations</h2>
                 <span className="recs-count">{p.recommendations.length}</span>
               </div>
+              <p style={{ fontSize: 11.5, color: "var(--muted)", lineHeight: 1.5, margin: "0 0 10px" }}>
+                Listed in the AI's priority order (1 = highest). You can <strong>insert several</strong>{" "}
+                into your plan, <strong>edit</strong> the inserted text however you like, and{" "}
+                <strong>dismiss</strong> any you disagree with — each is reversible. Hover a priority,
+                evidence, risk, or safety score to see the reasoning behind it.
+              </p>
               <div className="recs-container">
                 {orderedRecs.map((rec) => (
                   <RecommendationCard

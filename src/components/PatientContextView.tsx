@@ -30,8 +30,11 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
           </div>
           <div style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5, marginTop: 2 }}>{e.finding}</div>
           {e.source_quote && (
-            <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic", marginTop: 3, borderLeft: "2px solid var(--border-2)", paddingLeft: 8 }}>
-              “{e.source_quote}”
+            <div style={{ marginTop: 4, borderLeft: "2px solid var(--border-2)", paddingLeft: 8 }}>
+              <div style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--muted-2)", fontWeight: 700 }}>
+                Verbatim from the source note
+              </div>
+              <div style={{ fontSize: 11, color: "var(--muted)", fontStyle: "italic" }}>“{e.source_quote}”</div>
             </div>
           )}
         </div>
@@ -102,94 +105,122 @@ function ComorbidityView({ comorbidities }: { comorbidities: unknown }) {
   const cciAge = num(cci.age_adjusted_score);
   const surv = num(cci.estimated_10yr_survival_pct);
 
-  // Ordered top → bottom so the reader moves from the big picture to the detail
-  // and finally to the caveats: overall summary → the CCI score → what drives
-  // that score → treatment-relevant flags → other conditions → what was ruled
-  // out → confidence/data gaps.
+  const hasScore = cciUnadj != null || cciAge != null || surv != null;
+  const hasDetail =
+    drivers.length > 0 ||
+    presentFlags.length > 0 ||
+    activeFlags.length > 0 ||
+    other.length > 0 ||
+    negativeFlags.length > 0 ||
+    str(gaps.suspected_but_undocumented) != null ||
+    str(gaps.missing_data_points) != null;
+
+  // Two tiers: the SUMMARY (the CCI score and the plain-language burden summary
+  // read together at the top), then the DETAILED ANALYSIS that explains and
+  // supports those summaries (what drives the score, the specific conditions,
+  // and the data gaps).
   return (
     <div>
-      {narrative && (
-        <Section title="Overall comorbidity burden">
-          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#1e293b", lineHeight: 1.6 }}>
-            {narrative}
-          </div>
-        </Section>
-      )}
-
-      <Section title="Charlson Comorbidity Index (CCI)">
-        {cciUnadj != null || cciAge != null || surv != null ? (
+      <Section title="CCI summary">
+        {hasScore ? (
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
             {cciUnadj != null && <ScorePill label="CCI" value={String(cciUnadj)} />}
             {cciAge != null && <ScorePill label="Age-adjusted" value={String(cciAge)} />}
             {surv != null && <ScorePill label="Est. 10-yr survival" value={`${surv}%`} />}
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: "var(--muted-2)" }}>Score not calculated.</div>
+          <div style={{ fontSize: 12, color: "var(--muted-2)" }}>Charlson Comorbidity Index not calculated.</div>
         )}
         {str(cci.interpretation) && (
           <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.55 }}>{str(cci.interpretation)}</div>
         )}
       </Section>
 
-      {drivers.length > 0 && (
-        <Section title="What drives that score">
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {drivers.map((d, i) => (
-              <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-                <strong>{str(d.condition)}</strong>
-                {num(d.cci_weight) != null && <span style={{ color: "var(--muted)" }}> (weight {num(d.cci_weight)})</span>}
-                {str(d.weighting_rationale) && <> — {str(d.weighting_rationale)}</>}
-              </div>
-            ))}
+      <Section title="Comorbidity summary">
+        {narrative ? (
+          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 12px", fontSize: 12.5, color: "#1e293b", lineHeight: 1.6 }}>
+            {narrative}
           </div>
-        </Section>
-      )}
+        ) : (
+          <div style={{ fontSize: 12, color: "var(--muted-2)" }}>No overall summary provided.</div>
+        )}
+      </Section>
 
-      {(presentFlags.length > 0 || activeFlags.length > 0) && (
-        <Section title="Treatment-relevant flags (active)">
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {(activeFlags.length > 0 ? activeFlags : presentFlags).map((f, i) => (
-              <div key={i} style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 10px" }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400e" }}>
-                  {str(f.category)}
-                  {str(f.clinical_detail) && <span style={{ fontWeight: 500 }}> — {str(f.clinical_detail)}</span>}
-                  {str(f.severity_or_stage) && <span style={{ fontWeight: 500 }}> — {str(f.severity_or_stage)}</span>}
+      {hasDetail && (
+        <>
+          <SubDivider label="Detailed analysis" />
+
+          {drivers.length > 0 && (
+            <Section title="CCI score drivers">
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {drivers.map((d, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                    <strong>{str(d.condition)}</strong>
+                    {num(d.cci_weight) != null && <span style={{ color: "var(--muted)" }}> (weight {num(d.cci_weight)})</span>}
+                    {str(d.weighting_rationale) && <> — {str(d.weighting_rationale)}</>}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(presentFlags.length > 0 || activeFlags.length > 0) && (
+            <Section title="Detailed comorbidity analysis — treatment-relevant flags">
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {(activeFlags.length > 0 ? activeFlags : presentFlags).map((f, i) => (
+                  <div key={i} style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#92400e" }}>
+                      {str(f.category)}
+                      {str(f.clinical_detail) && <span style={{ fontWeight: 500 }}> — {str(f.clinical_detail)}</span>}
+                      {str(f.severity_or_stage) && <span style={{ fontWeight: 500 }}> — {str(f.severity_or_stage)}</span>}
+                    </div>
+                    {str(f.treatment_implication) && (
+                      <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5, marginTop: 3 }}>{str(f.treatment_implication)}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {other.length > 0 && (
+            <Section title="Other documented comorbidities">
+              <KeyValueList items={other} fields={["condition", "status", "details", "source_quote"]} />
+            </Section>
+          )}
+
+          {negativeFlags.length > 0 && (
+            <Section title="Screened & negative / undocumented">
+              <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{negativeFlags.join(", ")}.</div>
+            </Section>
+          )}
+
+          {(str(gaps.suspected_but_undocumented) || str(gaps.missing_data_points)) && (
+            <Section title="Confidence & data gaps">
+              {str(gaps.suspected_but_undocumented) && (
+                <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5, marginBottom: 4 }}>
+                  <span style={{ color: "var(--muted)" }}>Suspected/undocumented:</span> {str(gaps.suspected_but_undocumented)}
                 </div>
-                {str(f.treatment_implication) && (
-                  <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5, marginTop: 3 }}>{str(f.treatment_implication)}</div>
-                )}
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {other.length > 0 && (
-        <Section title="Other documented comorbidities">
-          <KeyValueList items={other} fields={["condition", "status", "details", "source_quote"]} />
-        </Section>
-      )}
-
-      {negativeFlags.length > 0 && (
-        <Section title="Screened & negative / undocumented">
-          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>{negativeFlags.join(", ")}.</div>
-        </Section>
-      )}
-
-      {(str(gaps.suspected_but_undocumented) || str(gaps.missing_data_points)) && (
-        <Section title="Confidence & data gaps">
-          {str(gaps.suspected_but_undocumented) && (
-            <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5, marginBottom: 4 }}>
-              <span style={{ color: "var(--muted)" }}>Suspected/undocumented:</span> {str(gaps.suspected_but_undocumented)}
-            </div>
+              )}
+              {str(gaps.missing_data_points) && (
+                <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
+                  <span style={{ color: "var(--muted)" }}>Missing data:</span> {str(gaps.missing_data_points)}
+                </div>
+              )}
+            </Section>
           )}
-          {str(gaps.missing_data_points) && (
-            <div style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 }}>
-              <span style={{ color: "var(--muted)" }}>Missing data:</span> {str(gaps.missing_data_points)}
-            </div>
-          )}
-        </Section>
+        </>
       )}
+    </div>
+  );
+}
+
+/** A lighter divider that separates tiers within a group (e.g. summary vs detail). */
+function SubDivider({ label }: { label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "18px 0 12px" }}>
+      <span style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--muted-2)", fontWeight: 700 }}>{label}</span>
+      <span style={{ flex: 1, height: 1, background: "var(--border-2)" }} />
     </div>
   );
 }
@@ -258,7 +289,10 @@ export default function PatientContextView({ patient }: { patient: Patient }) {
       <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: "16px 20px", background: "var(--surface-2)", borderRight: "1px solid var(--border-2)" }}>
         {ctx.patient_profile && (
           <div style={{ marginBottom: 16 }}>
-            <GroupHeader title="Patient summary" />
+            <GroupHeader
+              title="Overall patient summary"
+              subtitle="A one-paragraph snapshot of who this patient is and where they are in their disease course."
+            />
             <div style={{ fontSize: 13, color: "var(--text-2)", lineHeight: 1.6 }}>{ctx.patient_profile}</div>
           </div>
         )}
@@ -267,18 +301,24 @@ export default function PatientContextView({ patient }: { patient: Patient }) {
             Clinical timeline
           </button>
           <button className={`btn btn-sm ${view === "history" ? "btn-primary" : "btn-ghost"}`} onClick={() => setView("history")}>
-            Relevant history
+            Comorbidities &amp; CCI
           </button>
         </div>
 
         {view === "timeline" ? (
-          <Timeline events={timeline} />
+          <>
+            <GroupHeader
+              title="Clinical timeline"
+              subtitle="The patient's disease course in order, oldest to newest. Each entry shows a date and event type, the finding, and — where available — the verbatim quote from the note it was drawn from, so you can trace every point back to the source."
+            />
+            <Timeline events={timeline} />
+          </>
         ) : (
           <>
             <div style={{ marginBottom: 22 }}>
               <GroupHeader
-                title="Comorbidity burden"
-                subtitle="From the overall picture down to the specifics: summary, the CCI score, what drives it, treatment-relevant flags, and finally what's uncertain."
+                title="Comorbidities & CCI"
+                subtitle="The patient's other medical conditions and how heavy that burden is — this is what tells you whether they can tolerate aggressive treatment. Read the two summaries first; the detailed analysis below explains and supports them."
               />
               <ComorbidityView comorbidities={ctx.comorbidities} />
             </div>
