@@ -1,6 +1,6 @@
 [package]
 name = "ai-tumor-board"
-version = "0.9.4"
+version = "0.9.5"
 description = "AI Tumor Board — offline reviewer study app"
 authors = ["you"]
 edition = "2021"
